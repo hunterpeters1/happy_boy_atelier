@@ -15,11 +15,13 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSlider,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from .. import constants as C
+from .. import icons
 from ..canvas.undo_commands import SetNoteTextCommand, SetPropertyCommand
 from ..layers.reference_layer import ReferenceImageItem
 from ..layers.composition_layer import FocalPointItem, MovementLineItem, NoteItem
@@ -208,17 +210,19 @@ class PropertiesPanel(QWidget):
         align_row = QHBoxLayout(self._batch_align_widget)
         align_row.setContentsMargins(0, 0, 0, 0)
         align_row.addWidget(QLabel("Align"))
-        for label, mode, tip in [
-            ("⟸", "left", "Align left edges"),
-            ("⟹", "right", "Align right edges"),
-            ("⟰", "top", "Align top edges"),
-            ("⟱", "bottom", "Align bottom edges"),
+        for icon_name, mode, tip in [
+            ("align_left", "left", "Align left edges"),
+            ("align_right", "right", "Align right edges"),
+            ("align_top", "top", "Align top edges"),
+            ("align_bottom", "bottom", "Align bottom edges"),
         ]:
-            btn = QPushButton(label)
+            btn = QToolButton()
+            btn.setProperty("role", "compact")
+            btn.setIcon(icons.icon(icon_name))
             btn.setToolTip(tip)
-            btn.setFixedWidth(28)
             btn.clicked.connect(lambda _checked, m=mode: self._batch_align(m))
             align_row.addWidget(btn)
+        align_row.addStretch(1)
         blayout.addWidget(self._batch_align_widget)
 
         batch_delete = QPushButton("Delete Selected")

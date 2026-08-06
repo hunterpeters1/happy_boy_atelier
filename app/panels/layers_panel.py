@@ -243,6 +243,9 @@ class LayersPanel(QWidget):
         row = QTreeWidgetItem(parent)
         row.setIcon(0, icons.icon(icon_name))
         row.setText(0, label)
+        # A narrow dock elides long filenames/note text with "…" and gives
+        # no other way to read the full name — the tooltip is that way.
+        row.setToolTip(0, label)
         row.setData(0, _ROLE_ITEM, obj)
         self._row_for_obj[id(obj)] = row
 
@@ -290,7 +293,13 @@ class LayersPanel(QWidget):
         add_btn.setToolTip("Import reference image(s)…")
         add_btn.clicked.connect(self.request_import.emit)
         layout.addWidget(add_btn)
-        layout.addWidget(QLabel("Import reference image(s)…"))
+        # Shorter label than the button's own tooltip — the full sentence
+        # rarely fits this dock's width and QLabel doesn't auto-elide with
+        # "…" the way QTreeWidgetItem text does, so a long label just gets
+        # silently clipped with no indication there's more to it.
+        import_label = QLabel("Import…")
+        import_label.setToolTip("Import reference image(s)…")
+        layout.addWidget(import_label)
         layout.addStretch(1)
         self._set_row_widget(row, 0, widget)
 

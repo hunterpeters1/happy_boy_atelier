@@ -43,6 +43,15 @@ _SHAPES: dict[str, str] = {
     "chevron": '<path d="m6 4 6 6-6 6"/>',
     "image": '<rect x="2" y="3" width="16" height="14" rx="1"/><circle cx="7" cy="8" r="1.6"/><path d="m3 15 5-5 3 3 3-4 5 6"/>',
     "shapes": '<circle cx="6.5" cy="6.5" r="3.3"/><rect x="11" y="3.2" width="6" height="6"/><path d="M6.5 12 2.5 18h8Z"/>',
+    # Batch-align glyphs: an edge marker plus an arrow pointing toward it —
+    # previously rendered as raw Unicode double-arrow characters (e.g.
+    # U+27F8), which several UI fonts (including this app's default,
+    # Segoe UI) don't carry a glyph for, so the buttons showed nothing at
+    # all rather than falling back to a visible tofu box.
+    "align_left": '<path d="M4 3v14"/><path d="M16 10H7"/><path d="M10.5 6.5 7 10l3.5 3.5"/>',
+    "align_right": '<path d="M16 3v14"/><path d="M4 10h9"/><path d="M9.5 6.5 13 10l-3.5 3.5"/>',
+    "align_top": '<path d="M3 4h14"/><path d="M10 16V7"/><path d="M6.5 10.5 10 7l3.5 3.5"/>',
+    "align_bottom": '<path d="M3 16h14"/><path d="M10 4v9"/><path d="M6.5 9.5 10 13l3.5-3.5"/>',
 }
 
 
