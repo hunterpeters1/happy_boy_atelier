@@ -64,13 +64,18 @@ class CanvasView(QGraphicsView):
         self.zoom_changed.emit(self._zoom)
 
     def wheelEvent(self, event):
-        if event.modifiers() & Qt.ShiftModifier:
-            super().wheelEvent(event)
-            return
-        delta = event.angleDelta().y()
+        # Ctrl/Cmd+scroll zooms — the convention every other creative tool
+        # already trains into a painter's hand. Plain scroll pans vertically
+        # and Shift+scroll pans horizontally, matching a native scroll area
+        # instead of the reverse (plain wheel = zoom) this view used to use.
+        delta = event.angleDelta().y() or event.angleDelta().x()
         if delta == 0:
             return
-        self.set_zoom(self._zoom * (ZOOM_STEP if delta > 0 else 1 / ZOOM_STEP))
+        if event.modifiers() & Qt.ControlModifier:
+            self.set_zoom(self._zoom * (ZOOM_STEP if delta > 0 else 1 / ZOOM_STEP))
+            return
+        bar = self.horizontalScrollBar() if event.modifiers() & Qt.ShiftModifier else self.verticalScrollBar()
+        bar.setValue(bar.value() - delta)
 
     # -- pan --------------------------------------------------------------
     def keyPressEvent(self, event):

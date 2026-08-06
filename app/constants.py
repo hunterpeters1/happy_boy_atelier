@@ -130,12 +130,21 @@ COLOR_CANVAS = "#efe9dd"       # the painting surface itself (warm paper white)
 COLOR_CANVAS_EDGE = "#0c0d0e"
 
 COLOR_FOCAL_PRIMARY = "#c9482f"    # focal point markers
-COLOR_FOCAL_SECONDARY = "#c9a05c"
+# Reserved hues below: every content-marker color is deliberately distinct
+# from COLOR_BRASS (the one chrome/interactive accent) and from each other.
+# COLOR_FOCAL_SECONDARY and COLOR_GUIDE used to both equal COLOR_BRASS
+# verbatim, which meant a secondary focal point, a rule-of-thirds line, and
+# "this menu item is selected" were visually the same paint. Never collapse
+# a content color back onto COLOR_BRASS/COLOR_BRASS_BRIGHT.
+COLOR_FOCAL_SECONDARY = "#9575b0"   # violet — was identical to COLOR_BRASS
 COLOR_PERSPECTIVE = "#5fb3c9"       # horizon/vanishing/grid lines — cool blue,
                                      # reads distinctly from warm brass UI chrome
 COLOR_LIGHT = "#e8d477"             # light source / direction
 COLOR_SHADOW = "#5c6b78"            # shadow direction
-COLOR_GUIDE = "#c9a05c"             # rule of thirds / golden ratio, subdued
+COLOR_GUIDE = "#6b7480"             # rule of thirds / golden ratio — was
+                                     # identical to COLOR_BRASS; now a dim,
+                                     # neutral blue-grey so guides read as
+                                     # "structure," not "selected UI"
 
 FONT_FAMILY_UI = "Segoe UI"
 FONT_FAMILY_MONO = "Consolas"

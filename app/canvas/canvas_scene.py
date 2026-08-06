@@ -186,11 +186,26 @@ class CanvasScene(QGraphicsScene):
             self._deactivate_ui_item()
 
     def keyPressEvent(self, event) -> None:
-        if event.key() == Qt.Key_Escape and self._active_tool:
-            self.set_active_tool(None)
-            self.tool_finished.emit()
-            event.accept()
-            return
+        # Escape always backs out exactly one level: cancel an armed
+        # placement tool, then exit crop mode (previously Escape did
+        # nothing here — the only way out of crop was the Properties
+        # panel's Apply/Cancel buttons), then clear the selection.
+        if event.key() == Qt.Key_Escape:
+            if self._active_tool:
+                self.set_active_tool(None)
+                self.tool_finished.emit()
+                event.accept()
+                return
+            item = self._active_ui_item
+            if item is not None and hasattr(item, "is_cropping") and item.is_cropping():
+                item.cancel_crop()
+                event.accept()
+                return
+            if self.selectedItems():
+                self.clearSelection()
+                self._deactivate_ui_item()
+                event.accept()
+                return
         super().keyPressEvent(event)
 
     def _add(self, group, item, label: str) -> None:

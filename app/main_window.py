@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QPointF, QTimer
+from PySide6.QtCore import Qt, QPointF, QSize, QTimer
 from PySide6.QtGui import QAction, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import constants as C
+from . import icons
 from . import recovery
 from .atelier_io import (
     AtelierIOError,
@@ -123,7 +124,6 @@ class MainWindow(QMainWindow):
             self._rebuild_workspace(scene)
             self.layers_panel.refresh_reference_list()
             self.lock_action.setChecked(self.meta.locked)
-            self.lock_toolbar_action.setChecked(self.meta.locked)
             self._update_lock_banner()
             self.statusBar().showMessage("Recovered your last unsaved session — Save to keep it.", 6000)
         else:
@@ -137,6 +137,9 @@ class MainWindow(QMainWindow):
         self.view = CanvasView(scene, self)
         self.setCentralWidget(self.view)
         self.view.zoom_changed.connect(self._on_zoom_changed)
+        # A fresh CanvasView always starts with rulers visible; keep the
+        # View menu's checkbox honest if the artist had hidden them earlier.
+        self.view.set_ruler_visible(self.ruler_action.isChecked())
         scene.tool_finished.connect(self._on_tool_finished)
 
         # Undo/redo menu wiring — each new/opened project gets its own
@@ -222,65 +225,102 @@ class MainWindow(QMainWindow):
         menu = self.menuBar()
 
         file_menu = menu.addMenu("&File")
-        self._add_action(file_menu, "New Painting…", "Ctrl+N", self.new_project_dialog)
-        self._add_action(file_menu, "Open…", "Ctrl+O", self.open_project)
-        self._add_action(file_menu, "Save", "Ctrl+S", self.save_project)
+        self.new_action = self._add_action(file_menu, "New Painting…", "Ctrl+N", self.new_project_dialog, icon_name="new")
+        self.open_action = self._add_action(file_menu, "Open…", "Ctrl+O", self.open_project, icon_name="open")
+        self.save_action = self._add_action(file_menu, "Save", "Ctrl+S", self.save_project, icon_name="save")
         self._add_action(file_menu, "Save As…", "Ctrl+Shift+S", lambda: self.save_project(force_dialog=True))
         file_menu.addSeparator()
-        self._add_action(file_menu, "Import Reference Image(s)…", "Ctrl+I", self.import_images)
-        self._add_action(file_menu, "Export…", "Ctrl+E", self.export_project)
+        self.import_action = self._add_action(
+            file_menu, "Import Reference Image(s)…", "Ctrl+I", self.import_images, icon_name="import"
+        )
+        self.export_action = self._add_action(file_menu, "Export…", "Ctrl+E", self.export_project, icon_name="export")
         file_menu.addSeparator()
         self._add_action(file_menu, "Exit", "Ctrl+Q", self.close)
 
         edit_menu = menu.addMenu("&Edit")
-        self.undo_action = QAction("Undo", self)
+        self.undo_action = QAction(icons.icon("undo"), "Undo", self)
         self.undo_action.setShortcut(QKeySequence.Undo)
         self.undo_action.setEnabled(False)
         self.undo_action.triggered.connect(lambda: self.scene.undo_stack.undo() if self.scene else None)
+        self._set_tooltip(self.undo_action)
         edit_menu.addAction(self.undo_action)
-        self.redo_action = QAction("Redo", self)
+        self.redo_action = QAction(icons.icon("redo"), "Redo", self)
         self.redo_action.setShortcut(QKeySequence.Redo)
         self.redo_action.setEnabled(False)
         self.redo_action.triggered.connect(lambda: self.scene.undo_stack.redo() if self.scene else None)
+        self._set_tooltip(self.redo_action)
         edit_menu.addAction(self.redo_action)
         edit_menu.addSeparator()
-        self._add_action(edit_menu, "Delete Selected", "Del", self._delete_selected)
+        self._add_action(edit_menu, "Delete Selected", "Del", self._delete_selected, icon_name="delete")
 
         view_menu = menu.addMenu("&View")
         self._add_action(view_menu, "Zoom In", "Ctrl+=", lambda: self.view.zoom_in())
         self._add_action(view_menu, "Zoom Out", "Ctrl+-", lambda: self.view.zoom_out())
-        self._add_action(view_menu, "Fit Canvas", "Ctrl+0", lambda: self.view.fit_canvas(self.scene.canvas_rect()))
+        self.fit_action = self._add_action(
+            view_menu, "Fit Canvas", "Ctrl+0", lambda: self.view.fit_canvas(self.scene.canvas_rect()), icon_name="fit"
+        )
+        view_menu.addSeparator()
+        # set_ruler_visible() has existed on CanvasView since Phase 0 with
+        # no menu item, toolbar button, or shortcut ever wired to it — a
+        # dead feature nobody could discover. This is that wiring.
+        self.ruler_action = self._add_action(
+            view_menu, "Show Rulers", "Ctrl+R",
+            lambda checked: self.view.set_ruler_visible(checked) if self.view else None,
+            checkable=True,
+        )
+        self.ruler_action.setChecked(True)
 
         mode_menu = menu.addMenu("&Mode")
-        self.lock_action = self._add_action(mode_menu, "Lock Setup", "Ctrl+L", self.toggle_lock_setup, checkable=True)
-        self._add_action(mode_menu, "Enter Projector Mode", "F5", self.enter_projector_mode)
+        self.lock_action = self._add_action(
+            mode_menu, "Lock Setup", "Ctrl+L", self.toggle_lock_setup, checkable=True, icon_name="lock"
+        )
+        self.projector_action = self._add_action(
+            mode_menu, "Enter Projector Mode", "F5", self.enter_projector_mode, icon_name="projector"
+        )
 
         help_menu = menu.addMenu("&Help")
         self._add_action(help_menu, "About Happy Boy Atelier", None, self._show_about)
 
+        # One QAction per action, shared verbatim by menu and toolbar — a
+        # QAction built for the toolbar alone (the old toolbar.addAction(
+        # text, slot) pattern) can't carry the menu's shortcut into its own
+        # tooltip and the two copies can silently drift out of sync. There
+        # is exactly one object per action now, so that's structurally
+        # impossible.
         toolbar = QToolBar("Main")
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        toolbar.setIconSize(QSize(18, 18))
         self.addToolBar(toolbar)
-        toolbar.addAction("New", self.new_project_dialog)
-        toolbar.addAction("Open", self.open_project)
-        toolbar.addAction("Save", self.save_project)
+        toolbar.addAction(self.new_action)
+        toolbar.addAction(self.open_action)
+        toolbar.addAction(self.save_action)
         toolbar.addSeparator()
-        toolbar.addAction("Import", self.import_images)
-        toolbar.addAction("Export", self.export_project)
+        toolbar.addAction(self.undo_action)
+        toolbar.addAction(self.redo_action)
         toolbar.addSeparator()
-        toolbar.addAction("Fit", lambda: self.view.fit_canvas(self.scene.canvas_rect()))
+        toolbar.addAction(self.import_action)
+        toolbar.addAction(self.export_action)
         toolbar.addSeparator()
-        self.lock_toolbar_action = toolbar.addAction("Lock Setup", self.toggle_lock_setup)
-        self.lock_toolbar_action.setCheckable(True)
-        toolbar.addAction("Projector Mode", self.enter_projector_mode)
+        toolbar.addAction(self.fit_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.lock_action)
+        toolbar.addAction(self.projector_action)
 
-    def _add_action(self, menu, text, shortcut, slot, checkable: bool = False) -> QAction:
-        action = QAction(text, self)
+    def _set_tooltip(self, action: QAction) -> None:
+        shortcut = action.shortcut().toString()
+        label = action.text().replace("&", "")
+        action.setToolTip(f"{label} ({shortcut})" if shortcut else label)
+
+    def _add_action(
+        self, menu, text, shortcut, slot, checkable: bool = False, icon_name: str | None = None
+    ) -> QAction:
+        action = QAction(icons.icon(icon_name), text, self) if icon_name else QAction(text, self)
         if shortcut:
             action.setShortcut(QKeySequence(shortcut))
         action.setCheckable(checkable)
         action.triggered.connect(slot)
+        self._set_tooltip(action)
         menu.addAction(action)
         return action
 
@@ -408,7 +448,6 @@ class MainWindow(QMainWindow):
         self._rebuild_workspace(scene)
         self.layers_panel.refresh_reference_list()
         self.lock_action.setChecked(self.meta.locked)
-        self.lock_toolbar_action.setChecked(self.meta.locked)
         self._update_lock_banner()
 
     def export_project(self) -> None:
@@ -450,7 +489,6 @@ class MainWindow(QMainWindow):
         locked = not self.scene.is_globally_locked()
         self.scene.set_global_locked(locked)
         self.lock_action.setChecked(locked)
-        self.lock_toolbar_action.setChecked(locked)
         self.layers_panel.setEnabled(not locked)
         self._update_lock_banner()
 

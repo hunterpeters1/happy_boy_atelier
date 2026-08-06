@@ -1,0 +1,73 @@
+"""Single-weight line icons, rendered at runtime instead of shipped as
+color-baked files.
+
+ARCHITECTURE.md documents a "brass/graphite line-art" icon language for
+resources/icons/ that was never actually built — the toolbar has always
+been text-only. This module is that language, finally implemented: each
+shape is defined once, stroke-only, in a 20x20 viewBox, and tinted per
+QIcon mode so the same glyph reads clearly both on the toolbar's resting
+dark background and on a checked action's brass fill.
+"""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QByteArray, QSize, Qt
+from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
+
+from . import constants as C
+
+# Body markup only (no outer <svg> tag) — kept minimal, single stroke
+# weight, no fills, matching the "machined panel plate" brief in theme.py.
+_SHAPES: dict[str, str] = {
+    "new": '<path d="M5 2.5h6l4 4v11H5z"/><path d="M11 2.5v4h4"/><path d="M7.5 11.5h5M7.5 14.5h5"/>',
+    "open": '<path d="M3 6.5h5l1.3 2H17v8.5H3z"/>',
+    "save": '<path d="M4 3.5h9.5l3 3v10H4z"/><path d="M7 3.5v5h6.5v-5"/><path d="M7 13.5h6.5"/>',
+    "import": '<path d="M10 2.5v9.5M6.5 8.5l3.5 3.5 3.5-3.5"/><path d="M4 15h12v2.5H4z"/>',
+    "export": '<path d="M10 15.5v-9.5M6.5 9.5l3.5-3.5 3.5 3.5"/><path d="M4 15h12v2.5H4z"/>',
+    "fit": '<path d="M3 8V3.5h4.5M17 8V3.5h-4.5M3 12v4.5h4.5M17 12v4.5h-4.5"/>',
+    "undo": '<path d="M6.5 6H3V2.5"/><path d="M3 6a7.5 7.5 0 1 1 2 7.8"/>',
+    "redo": '<path d="M13.5 6H17V2.5"/><path d="M17 6a7.5 7.5 0 1 0-2 7.8"/>',
+    "delete": '<path d="M4 5.5h12M8 5.5v-2h4v2"/><path d="M6 5.5l.9 12h6.2l.9-12"/>',
+    "lock": '<rect x="5" y="9" width="10" height="8" rx="1"/><path d="M7.5 9V6.2a2.5 2.5 0 0 1 5 0V9"/>',
+    "unlock": '<rect x="5" y="9" width="10" height="8" rx="1"/><path d="M7.5 9V6.2a2.5 2.5 0 0 1 4.7-1.2"/>',
+    "projector": '<rect x="2" y="6.5" width="12" height="7" rx="1"/><circle cx="8" cy="10" r="2.1"/><path d="M14 8.7l4-2.2v7l-4-2.2"/>',
+    "focal": '<circle cx="10" cy="10" r="3.4"/><path d="M10 2v2.4M10 15.6V18M2 10h2.4M15.6 10H18"/>',
+    "movement": '<path d="M3.5 15c3-6 10-11 13-3"/><path d="M13.5 9.5l3 2.5-3.5 1"/>',
+    "note": '<path d="M4 3h9l3 3v11H4z"/><path d="M13 3v3h3"/><path d="M7 10h6M7 13h6"/>',
+    "vanishing": '<path d="M10 2v16M1 10h18"/><path d="M4.5 4.5L10 10l-5.5 5.5M15.5 4.5L10 10l5.5 5.5"/>',
+    "light": '<circle cx="10" cy="9" r="4"/><path d="M10 1.5v2M10 16.5v2M2.3 9h2M15.7 9h2M4.7 3.7l1.4 1.4M13.9 13.9l1.4 1.4M15.3 3.7l-1.4 1.4M5.1 13.9l-1.4 1.4"/>',
+    "shadow": '<circle cx="10" cy="9" r="4"/><path d="M4 17c2-2 10-2 12 0"/>',
+    "search": '<circle cx="8.5" cy="8.5" r="5.5"/><path d="m17 17-4-4"/>',
+    "eye": '<path d="M1 10s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="10" cy="10" r="2.6"/>',
+    "chevron": '<path d="m6 4 6 6-6 6"/>',
+}
+
+
+def _render(name: str, color: str, size: int) -> QPixmap:
+    body = _SHAPES[name]
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" '
+        f'fill="none" stroke="{color}" stroke-width="1.5" '
+        f'stroke-linecap="round" stroke-linejoin="round">{body}</svg>'
+    )
+    renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
+    pixmap = QPixmap(QSize(size, size))
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    renderer.render(painter)
+    painter.end()
+    return pixmap
+
+
+def icon(name: str, size: int = 18) -> QIcon:
+    """A QIcon tinted so it reads on both a resting dark toolbar surface
+    (Normal/Off) and a checked action's brass fill (Normal/On), matching
+    how QToolButton:checked already inverts to a brass background with
+    dark text in theme.py.
+    """
+    ic = QIcon()
+    ic.addPixmap(_render(name, C.COLOR_INK, size), QIcon.Normal, QIcon.Off)
+    ic.addPixmap(_render(name, C.COLOR_BG_DARKEST, size), QIcon.Normal, QIcon.On)
+    ic.addPixmap(_render(name, C.COLOR_INK_DIM, size), QIcon.Disabled, QIcon.Off)
+    return ic

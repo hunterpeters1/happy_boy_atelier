@@ -33,7 +33,9 @@ def apply_theme(app: QApplication) -> None:
     pal.setColor(QPalette.Disabled, QPalette.WindowText, QColor(C.COLOR_INK_DIM))
     app.setPalette(pal)
 
-    font = QFont(C.FONT_FAMILY_UI, 9)
+    # 9pt read as noticeably small for a desktop app default; 10pt keeps
+    # the panels dense without asking for a squint.
+    font = QFont(C.FONT_FAMILY_UI, 10)
     app.setFont(font)
 
     app.setStyleSheet(_stylesheet())
@@ -165,6 +167,12 @@ def _stylesheet() -> str:
         padding: 4px 6px;
         selection-background-color: {C.COLOR_BRASS};
         selection-color: {C.COLOR_BG_DARKEST};
+    }}
+    /* Monospace is reserved for genuine numeric readouts (scale, rotation,
+    grid spacing, line weight, etc.) — it does not belong on prose fields
+    like the project Title or a Note's free text, which read as body copy
+    typed by the artist, not a machine-generated number. */
+    QSpinBox, QDoubleSpinBox {{
         font-family: "{C.FONT_FAMILY_MONO}";
     }}
     QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{

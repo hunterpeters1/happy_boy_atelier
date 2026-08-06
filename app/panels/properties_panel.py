@@ -190,6 +190,14 @@ class PropertiesPanel(QWidget):
                 self.title.setText("Reference Image")
                 self.transform_box.setVisible(True)
                 self.crop_btn.setVisible(True)
+                # A locked image can't actually enter crop mode (see
+                # ReferenceImageItem.enter_crop_mode's early return) — the
+                # button used to stay enabled anyway and silently do
+                # nothing when clicked. It now looks as unavailable as it is.
+                self.crop_btn.setEnabled(not item.is_locked())
+                self.crop_btn.setToolTip(
+                    "Unlock this image to crop it." if item.is_locked() else ""
+                )
                 self.delete_btn.setVisible(True)
                 self.scale_spin.setValue(item.scale_factor())
                 self.rotation_spin.setValue(item.rotation())
@@ -311,6 +319,8 @@ class PropertiesPanel(QWidget):
         # state) — this stays a direct call.
         if not self._updating and isinstance(self._current, ReferenceImageItem):
             self._current.set_locked(on)
+            self.crop_btn.setEnabled(not on)
+            self.crop_btn.setToolTip("Unlock this image to crop it." if on else "")
 
     def _on_note_changed(self) -> None:
         if self._updating or not isinstance(self._current, NoteItem):
