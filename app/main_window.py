@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QPointF, QSize, QTimer
+from PySide6.QtCore import Qt, QPointF, QSize, QStandardPaths, QTimer
 from PySide6.QtGui import QAction, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -469,17 +469,19 @@ class MainWindow(QMainWindow):
     def export_project(self) -> None:
         if self.scene is None:
             return
-        dialog = ExportDialog(self)
+        # Destination defaults to the project's own save folder if it has
+        # one, else the OS Pictures folder — either way a real, existing
+        # directory, so the export panel never opens pointed at nowhere.
+        default_dir = (
+            self.current_path.parent if self.current_path
+            else Path(QStandardPaths.writableLocation(QStandardPaths.PicturesLocation) or str(Path.home()))
+        )
+        dialog = ExportDialog(self.scene.canvas_spec.name, default_dir, self)
         if not dialog.exec():
             return
         fmt = dialog.selected_format()
         dpi = dialog.dpi()
-        filters = {"png": "PNG Image (*.png)", "jpg": "JPEG Image (*.jpg)", "pdf": "PDF Planning Sheet (*.pdf)"}
-        filename, _ = QFileDialog.getSaveFileName(self, "Export", "", filters[fmt])
-        if not filename:
-            return
-        if not filename.lower().endswith(f".{fmt}"):
-            filename += f".{fmt}"
+        filename = str(dialog.destination_path())
 
         rect = self.scene.canvas_rect()
         try:
@@ -493,7 +495,7 @@ class MainWindow(QMainWindow):
                 spec = self.scene.canvas_spec
                 label = f"{spec.name} — {spec.width:g} x {spec.height:g} {spec.unit}"
                 export_pdf_planning_sheet(self.scene, rect, filename, label, notes, px_per_inch=C.SCENE_PX_PER_INCH)
-        except AtelierIOError as exc:
+        except (AtelierIOError, OSError) as exc:
             QMessageBox.critical(self, "Export Failed", str(exc))
             return
         self.statusBar().showMessage(f"Exported to {Path(filename).name}", 4000)

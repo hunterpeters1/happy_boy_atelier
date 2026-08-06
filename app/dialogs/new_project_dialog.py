@@ -1,21 +1,39 @@
-"""New Painting dialog: pick a canvas format (portrait / landscape / square
-presets, or fully custom width/height/unit)."""
+"""New Painting dialog: one size picker, always editable.
+
+Previously "Custom" was a fourth peer category next to Portrait/Landscape/
+Square, switched to via a dropdown that hid the width/height/unit fields
+entirely unless "Custom" was chosen — meaning even a one-inch tweak to a
+preset required switching into an entirely different mode instead of just
+editing a number. There was also a latent bug: the dialog's own default
+(the first Portrait preset, 8x10in) didn't match CanvasSpec's own
+dataclass default (16x20in) — nothing kept the two in sync since they
+were two independently-authored defaults.
+
+Now there is exactly one size — width/height/unit fields, always visible
+and always editable — seeded directly from a fresh CanvasSpec() so the
+dialog's default and the data model's default are structurally the same
+value, not two numbers someone has to remember to keep matching. An
+orientation filter (Portrait/Landscape/Square) narrows which preset list
+is shown; clicking a preset just fills in the fields, it doesn't switch
+modes or hide anything.
+"""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox,
+    QButtonGroup,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QComboBox,
+    QRadioButton,
     QVBoxLayout,
 )
 
@@ -42,58 +60,66 @@ class NewProjectDialog(QDialog):
         form.addRow("Title", self.name_edit)
         layout.addLayout(form)
 
-        cat_row = QHBoxLayout()
-        cat_row.addWidget(QLabel("Format"))
-        self.category_combo = QComboBox()
-        self.category_combo.addItems(["Portrait", "Landscape", "Square", "Custom"])
-        self.category_combo.currentTextChanged.connect(self._on_category_changed)
-        cat_row.addWidget(self.category_combo)
-        layout.addLayout(cat_row)
+        orient_row = QHBoxLayout()
+        orient_row.addWidget(QLabel("Presets"))
+        self._orient_group = QButtonGroup(self)
+        for category in _CATEGORIES:
+            radio = QRadioButton(category)
+            if category == "Portrait":
+                radio.setChecked(True)
+            radio.toggled.connect(lambda on, c=category: on and self._show_presets(c))
+            self._orient_group.addButton(radio)
+            orient_row.addWidget(radio)
+        orient_row.addStretch(1)
+        layout.addLayout(orient_row)
 
         self.preset_list = QListWidget()
-        self.preset_list.setMaximumHeight(140)
+        self.preset_list.setMaximumHeight(120)
+        self.preset_list.itemClicked.connect(self._apply_preset)
         layout.addWidget(self.preset_list)
 
-        self.custom_group = QGroupBox("Custom Dimensions")
-        cform = QFormLayout(self.custom_group)
+        size_form = QFormLayout()
         self.width_spin = QDoubleSpinBox()
         self.width_spin.setRange(0.5, 500)
-        self.width_spin.setValue(16)
         self.height_spin = QDoubleSpinBox()
         self.height_spin.setRange(0.5, 500)
-        self.height_spin.setValue(20)
         self.unit_combo = QComboBox()
         self.unit_combo.addItems(C.UNITS)
-        cform.addRow("Width", self.width_spin)
-        cform.addRow("Height", self.height_spin)
-        cform.addRow("Unit", self.unit_combo)
-        layout.addWidget(self.custom_group)
+        size_form.addRow("Width", self.width_spin)
+        size_form.addRow("Height", self.height_spin)
+        size_form.addRow("Unit", self.unit_combo)
+        layout.addLayout(size_form)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self._on_category_changed("Portrait")
+        # Seeded from the data model's own default — not a second,
+        # independently-chosen number that can drift out of sync with it.
+        default = CanvasSpec()
+        self.width_spin.setValue(default.width)
+        self.height_spin.setValue(default.height)
+        self.unit_combo.setCurrentText(default.unit)
 
-    def _on_category_changed(self, category: str) -> None:
+        self._show_presets("Portrait")
+
+    def _show_presets(self, category: str) -> None:
         self.preset_list.clear()
-        is_custom = category == "Custom"
-        self.custom_group.setVisible(is_custom)
-        self.preset_list.setVisible(not is_custom)
-        if not is_custom:
-            for label, w, h in _CATEGORIES[category]:
-                entry = QListWidgetItem(f'{label} in')
-                entry.setData(Qt.UserRole, (w, h))
-                self.preset_list.addItem(entry)
-            self.preset_list.setCurrentRow(0)
+        for label, w, h in _CATEGORIES[category]:
+            entry = QListWidgetItem(f"{label} in")
+            entry.setData(Qt.UserRole, (w, h))
+            self.preset_list.addItem(entry)
+
+    def _apply_preset(self, entry: QListWidgetItem) -> None:
+        w, h = entry.data(Qt.UserRole)
+        self.width_spin.setValue(w)
+        self.height_spin.setValue(h)
+        self.unit_combo.setCurrentText("in")
 
     def canvas_spec(self) -> CanvasSpec:
         name = self.name_edit.text().strip() or "Untitled Painting"
-        category = self.category_combo.currentText()
-        if category == "Custom":
-            return CanvasSpec(name=name, width=self.width_spin.value(),
-                               height=self.height_spin.value(), unit=self.unit_combo.currentText())
-        current = self.preset_list.currentItem()
-        w, h = current.data(Qt.UserRole) if current else (16, 20)
-        return CanvasSpec(name=name, width=float(w), height=float(h), unit="in")
+        return CanvasSpec(
+            name=name, width=self.width_spin.value(),
+            height=self.height_spin.value(), unit=self.unit_combo.currentText(),
+        )
