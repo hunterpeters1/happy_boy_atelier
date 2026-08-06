@@ -93,7 +93,7 @@ def _stylesheet() -> str:
         background: transparent;
         border: 1px solid transparent;
         border-radius: 2px;
-        padding: 5px 8px;
+        padding: 7px 10px;
         color: {C.COLOR_INK};
     }}
     QToolButton:hover {{

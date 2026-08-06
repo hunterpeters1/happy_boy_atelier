@@ -346,7 +346,7 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("Main")
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        toolbar.setIconSize(QSize(18, 18))
+        toolbar.setIconSize(QSize(20, 20))
         self.addToolBar(toolbar)
         toolbar.addAction(self.new_action)
         toolbar.addAction(self.open_action)

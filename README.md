@@ -2,8 +2,7 @@
 
 A digital drafting table for traditional painters. Prepare a physical
 painting before you touch the canvas: pick a format, arrange reference
-photos, plan composition, perspective, and lighting, then throw the setup
-onto the wall in projector mode. It is not a painting app and not an image
+photos, plan composition, perspective, and lighting. It is not a painting app and not an image
 generator — every mark on the canvas is placed by the artist.
 
 See `ARCHITECTURE.md` for the technical design.

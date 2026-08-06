@@ -62,7 +62,7 @@ def _render(name: str, color: str, size: int) -> QPixmap:
     return pixmap
 
 
-def icon(name: str, size: int = 18) -> QIcon:
+def icon(name: str, size: int = 20) -> QIcon:
     """A QIcon tinted so it reads on both a resting dark toolbar surface
     (Normal/Off) and a checked action's brass fill (Normal/On), matching
     how QToolButton:checked already inverts to a brass background with
