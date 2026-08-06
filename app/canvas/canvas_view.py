@@ -6,17 +6,22 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPen
-from PySide6.QtWidgets import QGraphicsView
+from PySide6.QtWidgets import QGraphicsView, QMenu
 
 from .. import constants as C
+from .. import icons
 
 ZOOM_STEP = 1.15
 MIN_ZOOM = 0.05
 MAX_ZOOM = 24.0
+_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 
 
 class CanvasView(QGraphicsView):
     zoom_changed = Signal(float)
+    # Local image file paths dropped from the OS onto the canvas — there
+    # was previously no way to import a reference except the file dialog.
+    files_dropped = Signal(list)
 
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
@@ -31,6 +36,7 @@ class CanvasView(QGraphicsView):
         self._middle_panning = False
         self._show_ruler = True
         self.setMouseTracking(True)
+        self.setAcceptDrops(True)
 
     # -- zoom -----------------------------------------------------------
     def current_zoom(self) -> float:
@@ -110,6 +116,82 @@ class CanvasView(QGraphicsView):
         if event.button() == Qt.MiddleButton:
             self.setDragMode(QGraphicsView.RubberBandDrag if not self._space_panning else QGraphicsView.ScrollHandDrag)
             self.unsetCursor()
+
+    # -- OS drag-and-drop import ------------------------------------------
+    @staticmethod
+    def _image_paths(mime) -> list[str]:
+        if not mime.hasUrls():
+            return []
+        return [
+            url.toLocalFile() for url in mime.urls()
+            if url.isLocalFile() and url.toLocalFile().lower().endswith(_IMAGE_EXTENSIONS)
+        ]
+
+    def dragEnterEvent(self, event):
+        if self._image_paths(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if self._image_paths(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        paths = self._image_paths(event.mimeData())
+        if paths:
+            self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
+
+    # -- context menu -------------------------------------------------------
+    def _build_context_menu(self, scene_pos: QPointF) -> QMenu | None:
+        """Construct (but don't show) the right-click menu for a scene
+        position — split out from contextMenuEvent so the menu's contents
+        can be tested without ever calling the blocking QMenu.exec().
+        """
+        scene = self.scene()
+        if scene is None or not hasattr(scene, "interactive_item_at"):
+            return None
+        item = scene.interactive_item_at(scene_pos, self.transform())
+        menu = QMenu(self)
+        if item is not None:
+            if hasattr(scene, "set_selection"):
+                scene.set_selection([item])
+            locked = item.is_locked() if hasattr(item, "is_locked") else False
+            if hasattr(scene, "delete_selected_items"):
+                delete_action = menu.addAction(icons.icon("delete"), "Delete")
+                delete_action.setEnabled(not locked)
+                delete_action.triggered.connect(scene.delete_selected_items)
+            if hasattr(item, "set_locked"):
+                lock_action = menu.addAction(
+                    icons.icon("unlock" if locked else "lock"), "Unlock" if locked else "Lock"
+                )
+                lock_action.triggered.connect(lambda: item.set_locked(not locked))
+            if hasattr(item, "enter_crop_mode"):
+                menu.addSeparator()
+                crop_action = menu.addAction(icons.icon("shapes"), "Crop…")
+                crop_action.setEnabled(not locked)
+                crop_action.triggered.connect(item.enter_crop_mode)
+        else:
+            fit_action = menu.addAction(icons.icon("fit"), "Fit Canvas")
+            fit_action.triggered.connect(lambda: self.fit_canvas(scene.canvas_rect()))
+            if hasattr(scene, "active_tool") and scene.active_tool():
+                menu.addSeparator()
+                cancel_action = menu.addAction("Cancel Tool (Esc)")
+                cancel_action.triggered.connect(lambda: scene.set_active_tool(None))
+        return menu
+
+    def contextMenuEvent(self, event):
+        menu = self._build_context_menu(self.mapToScene(event.pos()))
+        if menu is None:
+            super().contextMenuEvent(event)
+            return
+        if not menu.isEmpty():
+            menu.exec(event.globalPos())
 
     # -- ruler overlay ----------------------------------------------------
     def set_ruler_visible(self, visible: bool) -> None:

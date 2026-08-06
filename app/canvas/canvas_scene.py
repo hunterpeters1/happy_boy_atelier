@@ -5,7 +5,7 @@ full layer stack.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtCore import QLineF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPen, QTransform, QUndoStack
 from PySide6.QtWidgets import QGraphicsScene
 
@@ -69,6 +69,11 @@ class CanvasScene(QGraphicsScene):
         # The app's own selection list — see selected_items() below for why
         # this exists instead of using QGraphicsScene's built-in one.
         self._selected_items: list = []
+        # Live rubber-band line while a two-click tool has its first point
+        # placed and is waiting for the second — previously there was no
+        # feedback at all between the two clicks beyond a pressed toolbar
+        # button off to the side.
+        self._preview_line = None
 
         # Drives the resize/rotate handles + highlight border on reference
         # images (see ReferenceImageItem.set_ui_active in reference_layer.py).
@@ -176,6 +181,26 @@ class CanvasScene(QGraphicsScene):
     def set_active_tool(self, tool: str | None) -> None:
         self._active_tool = tool
         self._pending_point = None
+        self._clear_preview_line()
+
+    def _clear_preview_line(self) -> None:
+        if self._preview_line is not None:
+            self.removeItem(self._preview_line)
+            self._preview_line = None
+
+    def _update_preview_line(self, pos) -> None:
+        if self._preview_line is None:
+            pen = QPen(QColor(C.COLOR_PERSPECTIVE), 1.5, Qt.DashLine)
+            self._preview_line = self.addLine(QLineF(self._pending_point, pos), pen)
+            self._preview_line.setZValue(1000)
+            self._preview_line.setAcceptedMouseButtons(Qt.NoButton)
+        else:
+            self._preview_line.setLine(QLineF(self._pending_point, pos))
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._pending_point is not None and self._active_tool in _TWO_CLICK_TOOLS:
+            self._update_preview_line(event.scenePos())
+        super().mouseMoveEvent(event)
 
     def active_tool(self) -> str | None:
         return self._active_tool
@@ -225,21 +250,8 @@ class CanvasScene(QGraphicsScene):
             return
         super().mousePressEvent(event)
 
-    def _maybe_deactivate_on_empty_click(self, pos) -> None:
-        """A click that doesn't land on any selectable item (empty canvas,
-        or the start of a rubber-band drag) clears the current selection
-        and drops the resize/rotate handle target — previously this only
-        cleared the handle target; the Properties panel had no path back
-        to "Nothing selected" from a background click at all.
-
-        "Landed on a selectable item" is checked via InteractiveItem, the
-        shared base every marker type inherits — not set_ui_active, which
-        only ReferenceImageItem implements. Walking up looking for
-        set_ui_active specifically used to misidentify a click on any
-        non-reference-image item (a focal point, a note, ...) as an empty
-        click; harmless before (nothing consumed the result but the
-        reference-image-only handle frame), but load-bearing now that a
-        real selection list hangs off the same check.
+    def interactive_item_at(self, pos, transform=None):
+        """The topmost InteractiveItem at a scene position, or None.
 
         Uses items(pos), not itemAt(pos) — itemAt() reports only the
         single topmost item by z-order/shape and ignores
@@ -247,19 +259,28 @@ class CanvasScene(QGraphicsScene):
         overlay (top z-order, covers the whole canvas, non-interactive by
         design) sitting over whatever was actually clicked. items() scans
         the full stack at that point so a non-interactive layer on top
-        doesn't hide an interactive marker underneath it.
+        doesn't hide an interactive marker underneath it. Shared by the
+        empty-click deselect check below and CanvasView's context menu.
         """
-        views = self.views()
-        transform = views[0].transform() if views else QTransform()
-        hit_interactive = False
+        if transform is None:
+            views = self.views()
+            transform = views[0].transform() if views else QTransform()
         for candidate in self.items(pos, Qt.IntersectsItemShape, Qt.DescendingOrder, transform):
             node = candidate
             while node is not None and not isinstance(node, InteractiveItem):
                 node = node.parentItem()
             if node is not None:
-                hit_interactive = True
-                break
-        if hit_interactive:
+                return node
+        return None
+
+    def _maybe_deactivate_on_empty_click(self, pos) -> None:
+        """A click that doesn't land on any selectable item (empty canvas,
+        or the start of a rubber-band drag) clears the current selection
+        and drops the resize/rotate handle target — previously this only
+        cleared the handle target; the Properties panel had no path back
+        to "Nothing selected" from a background click at all.
+        """
+        if self.interactive_item_at(pos) is not None:
             return
         if self._active_ui_item is not None:
             self._deactivate_ui_item()

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import QBuffer, QIODevice, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import (
+    QApplication,
     QGraphicsItem,
     QGraphicsItemGroup,
     QGraphicsRectItem,
@@ -24,6 +25,11 @@ from ..canvas.interactive_item import InteractiveItem
 from ..canvas.resize_math import compute_corner_resize
 
 CROP_HANDLE_PX = 10
+ROTATION_SNAP_DEG = 15.0
+# Screen-pixel tolerance for position snapping — converted to scene units
+# per-drag via the current view zoom, so the catch radius feels the same
+# whether zoomed in or out.
+SNAP_TOLERANCE_PX = 8.0
 # Generous grab radius (viewport/device pixels) around each visual handle.
 # Hit-testing for the resize/rotate handles is done manually here, in
 # ReferenceImageItem's own mouse handlers, rather than by giving the
@@ -96,6 +102,11 @@ class ReferenceImageItem(InteractiveItem):
         self._handle_press_scale = (1.0, 1.0)
         self._handle_press_rotation = 0.0
         self._handle_anchor_scene = QPointF()
+        # True only while a plain body drag (not a handle drag, not a
+        # programmatic setPos from undo/redo, batch align, etc.) is in
+        # progress — itemChange() only snaps position during this window,
+        # so restoring an exact stored position is never silently nudged.
+        self._body_dragging = False
 
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.OpenHandCursor)
@@ -213,7 +224,10 @@ class ReferenceImageItem(InteractiveItem):
         elif self._active_handle == "rotate":
             local = self.mapFromScene(event.scenePos())
             angle = math.degrees(math.atan2(local.x(), -local.y()))
-            self.setRotation(self._handle_press_rotation + angle)
+            new_rotation = self._handle_press_rotation + angle
+            if event.modifiers() & Qt.ShiftModifier:
+                new_rotation = round(new_rotation / ROTATION_SNAP_DEG) * ROTATION_SNAP_DEG
+            self.setRotation(new_rotation)
         self._handles.reposition()
 
     def mousePressEvent(self, event) -> None:
@@ -223,6 +237,7 @@ class ReferenceImageItem(InteractiveItem):
                 self._begin_handle_drag(hit)
                 event.accept()
                 return
+            self._body_dragging = True
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
@@ -238,6 +253,7 @@ class ReferenceImageItem(InteractiveItem):
             self.commit_transform()
             event.accept()
             return
+        self._body_dragging = False
         super().mouseReleaseEvent(event)
 
     # -- lock / visibility ---------------------------------------------
@@ -347,7 +363,49 @@ class ReferenceImageItem(InteractiveItem):
         return not self._crop_mode
 
     def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self._body_dragging:
+            return self._snap_position(value)
         return super().itemChange(change, value)
+
+    def _snap_position(self, proposed: QPointF) -> QPointF:
+        """Snap the item's center to the canvas center or to another
+        visible reference image's center, within a zoom-independent
+        catch radius. Hold Alt/Option to bypass entirely.
+        """
+        if QApplication.keyboardModifiers() & Qt.AltModifier:
+            return proposed
+        scene = self.scene()
+        if scene is None:
+            return proposed
+        views = scene.views()
+        zoom = views[0].transform().m11() if views else 1.0
+        tolerance = SNAP_TOLERANCE_PX / max(zoom, 0.01)
+
+        xs: list[float] = []
+        ys: list[float] = []
+        canvas_rect = getattr(scene, "canvas_rect", None)
+        if canvas_rect is not None:
+            rect = canvas_rect()
+            xs.append(rect.center().x())
+            ys.append(rect.center().y())
+        reference_layer = getattr(scene, "reference_layer", None)
+        if reference_layer is not None:
+            for other in reference_layer.items():
+                if other is self or not other.isVisible():
+                    continue
+                xs.append(other.pos().x())
+                ys.append(other.pos().y())
+
+        x, y = proposed.x(), proposed.y()
+        for cx in xs:
+            if abs(x - cx) <= tolerance:
+                x = cx
+                break
+        for cy in ys:
+            if abs(y - cy) <= tolerance:
+                y = cy
+                break
+        return QPointF(x, y)
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)

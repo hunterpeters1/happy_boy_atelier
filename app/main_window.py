@@ -30,6 +30,7 @@ from .atelier_io import (
 from .canvas.canvas_scene import CanvasScene
 from .canvas.canvas_view import CanvasView
 from .canvas.undo_commands import AddItemCommand
+from .dialogs.command_palette import CommandPalette
 from .dialogs.export_dialog import ExportDialog
 from .dialogs.new_project_dialog import NewProjectDialog
 from .panels.layers_panel import LayersPanel
@@ -140,6 +141,9 @@ class MainWindow(QMainWindow):
         # A fresh CanvasView always starts with rulers visible; keep the
         # View menu's checkbox honest if the artist had hidden them earlier.
         self.view.set_ruler_visible(self.ruler_action.isChecked())
+        # Dropping image files from the OS onto the canvas imports them —
+        # previously the file dialog was the only way in.
+        self.view.files_dropped.connect(self._import_image_paths)
         scene.tool_finished.connect(self._on_tool_finished)
 
         # Undo/redo menu wiring — each new/opened project gets its own
@@ -283,6 +287,10 @@ class MainWindow(QMainWindow):
             checkable=True,
         )
         self.ruler_action.setChecked(True)
+        view_menu.addSeparator()
+        self.palette_action = self._add_action(
+            view_menu, "Command Palette…", "Ctrl+K", self.open_command_palette
+        )
 
         mode_menu = menu.addMenu("&Mode")
         self.lock_action = self._add_action(
@@ -346,6 +354,31 @@ class MainWindow(QMainWindow):
             "Plan composition, perspective, and lighting before you touch the physical canvas.",
         )
 
+    def _collect_actions(self) -> list[QAction]:
+        """Walk the menu bar's own QActions rather than maintaining a
+        second, separately-authored command list — anything added to a
+        menu in the future is automatically searchable in the palette
+        with no extra step, and the two can never drift apart.
+        """
+        result: list[QAction] = []
+
+        def walk(actions) -> None:
+            for action in actions:
+                if action.isSeparator() or action is self.palette_action:
+                    continue
+                submenu = action.menu()
+                if submenu is not None:
+                    walk(submenu.actions())
+                else:
+                    result.append(action)
+
+        walk(self.menuBar().actions())
+        return result
+
+    def open_command_palette(self) -> None:
+        dialog = CommandPalette(self._collect_actions(), self)
+        dialog.exec()
+
     # -- project lifecycle --------------------------------------------------
     def _new_project(self, spec: CanvasSpec) -> None:
         self.current_path = None
@@ -364,21 +397,36 @@ class MainWindow(QMainWindow):
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Import Reference Images", "", "Images (*.png *.jpg *.jpeg *.bmp *.webp)"
         )
-        if not paths:
+        self._import_image_paths(paths)
+
+    def _import_image_paths(self, paths: list[str]) -> None:
+        """Shared by the Import dialog and CanvasView's OS drag-and-drop
+        (there was previously no way to import except the file dialog).
+        A multi-file import is now one undo step, not one per file —
+        matching how multi-delete already batches into a single macro.
+        """
+        if self.scene is None or not paths:
             return
         rect = self.scene.canvas_rect()
         center = rect.center()
         cascade = 0
-        for path in paths:
-            pixmap = QPixmap(path)
-            if pixmap.isNull():
-                continue
-            offset_center = center + QPointF(cascade * 18, cascade * 18)
-            item = self.scene.reference_layer.build_image_item(
-                pixmap, rect.width(), rect.height(), offset_center, display_name=Path(path).name
-            )
-            self.scene.undo_stack.push(AddItemCommand(self.scene.reference_layer, item, "Add reference image"))
-            cascade += 1
+        multi = len(paths) > 1
+        if multi:
+            self.scene.undo_stack.beginMacro("Import reference images")
+        try:
+            for path in paths:
+                pixmap = QPixmap(path)
+                if pixmap.isNull():
+                    continue
+                offset_center = center + QPointF(cascade * 18, cascade * 18)
+                item = self.scene.reference_layer.build_image_item(
+                    pixmap, rect.width(), rect.height(), offset_center, display_name=Path(path).name
+                )
+                self.scene.undo_stack.push(AddItemCommand(self.scene.reference_layer, item, "Add reference image"))
+                cascade += 1
+        finally:
+            if multi:
+                self.scene.undo_stack.endMacro()
         self.layers_panel.refresh_reference_list()
 
     def _build_manifest(self) -> tuple[dict, dict]:
