@@ -1,5 +1,148 @@
 # Changelog
 
+## Unreleased — UX redesign ("Studio, Not Software")
+
+A ground-up interaction and visual-design pass, driven by a full-source
+UX audit rather than a stylistic refresh — several items below are real
+functional bugs the audit surfaced, not polish. Landed as seven phases,
+each its own commit.
+
+### Phase 1 — Design system foundation
+- A real single-weight line-icon set (`app/icons.py`, rendered at runtime
+  from hand-authored SVG shapes), finally implementing the "brass/
+  graphite line-art" toolbar language `ARCHITECTURE.md` had documented
+  since v1.0 but that was never actually built — the toolbar was
+  text-only. Icon buttons were bumped slightly larger since.
+- Every action is one shared `QAction` between its menu entry and
+  toolbar button (previously the toolbar built separate, un-synced
+  `QAction` instances with no shortcut shown in their tooltips).
+- Fixed a real color collision: `COLOR_FOCAL_SECONDARY` and
+  `COLOR_GUIDE` were both literally `COLOR_BRASS` — a secondary focal
+  point, a rule-of-thirds line, and "this menu item is selected" all
+  the same paint. Each now has its own reserved hue.
+- Base font 9pt → 10pt; monospace is now reserved for genuine numeric
+  readouts instead of forced onto every text field, including the
+  project Title and Note text.
+- Zoom convention flipped to match every other creative tool:
+  Ctrl/Cmd+scroll zooms, plain scroll pans vertically, Shift+scroll
+  pans horizontally (previously plain wheel zoomed).
+- Escape now backs out of crop mode (previously it only cancelled an
+  armed placement tool — there was no keyboard way out of cropping at
+  all). A locked reference image's Crop… button is now disabled instead
+  of staying clickable and silently doing nothing. Wired the
+  `Show Rulers` toggle (`View` menu, Ctrl+R) that existed in code with
+  no menu item, toolbar button, or shortcut pointing to it.
+
+### Phase 2 — Selection model
+Set out to unify two selection-notification systems the design audit
+flagged; turned up something bigger along the way. Confirmed at
+runtime (a real `QTest.mouseClick` and rubber-band simulation) that
+`QGraphicsItem.setSelected()`/`isSelected()`/`QGraphicsScene.
+selectedItems()` did not work **at all** for any item in the app —
+not unreliably, never — because every layer is a `QGraphicsItemGroup`
+with `setHandlesChildEvents(False)`. In the shipped app this meant
+**Delete-after-click and rubber-band multi-select never worked**, and
+the selected-item highlight for focal points, movement lines, light
+sources, and direction arrows never rendered.
+
+- Replaced Qt's selection model outright with `CanvasScene`'s own
+  (`selected_items()`/`set_selection()`/`add_to_selection()`/
+  `remove_from_selection()`, backed by a plain list and a
+  `selection_changed` signal) — the one thing every consumer (Inspector,
+  Delete, the selected-item paint highlight, lock/unlock) now goes
+  through.
+- Fixed the Inspector's dual-signal bug this phase originally set out
+  for: `item_activated` used to also drive the Inspector directly,
+  forcing single-item display even during a Shift-multi-select. It now
+  drives only the resize/rotate handle frame.
+- Fixed a related bug in the same code path: the empty-click deselect
+  check used `itemAt()` (topmost item only, ignoring
+  `acceptedMouseButtons`), so it always hit the non-interactive Guides
+  overlay sitting on top of the whole canvas and treated every click as
+  empty. Switched to scanning the full z-stack.
+- A background click now actually clears the Inspector to "Nothing
+  selected" — there was previously no path back to that state at all.
+
+### Phase 3 — Project Panel
+- Replaced the Layers dock's five hardcoded `QGroupBox` sections (no
+  tree, no reordering, Guides missing its own Visible/Locked row) with
+  one real outliner (`app/panels/layers_panel.py`, dock title now
+  "Project"): every placed item — not just reference images — gets a
+  named, selectable row, with inline eye/lock icon buttons and a live
+  search field across the whole tree.
+- Reference images are named by their actual filename now, not
+  "Reference 1/2/3" — `ReferenceImageItem.display_name`, threaded
+  through import and the `.atelier` format's new `"name"` field on
+  reference entries (older files without it fall back to the image id).
+- Guides gets a real visibility toggle — previously the only layer with
+  zero interaction surface beyond its two checkboxes.
+- Not included this pass, called out rather than half-built:
+  drag-to-reorder within a layer (no layer group exposes a reorder
+  operation yet) and true hover-reveal row icons (always visible
+  instead).
+
+### Phase 4 — Inspector
+- Vanishing point and horizon position are editable fields now, not a
+  read-only label — the only previous way to reposition either was a
+  canvas drag. Shown in the canvas's own unit (in/cm/mm/px), not raw
+  scene coordinates.
+- Multi-selecting more than one item used to hide every control and
+  show only "Multiple items selected." A Batch Edit panel now offers
+  relative opacity/scale nudges, four-way align, and batch delete, each
+  as one undo step.
+- Found and fixed a rebuild/selection race surfaced by chaining two
+  batch edits back to back: the Project Panel's structural rebuild
+  cleared the tree's selection unguarded, which fed back into
+  `scene.set_selection([])` and silently wiped the real selection
+  mid-operation.
+
+### Phase 5 — Export & New Painting
+- Export is one panel now, not two dialogs — destination (pre-filled
+  from the project name and save folder, live-updating as the format
+  changes) lives alongside format/DPI; no second native Save dialog.
+- New Painting's "Custom" category (a fourth peer next to Portrait/
+  Landscape/Square that hid the size fields entirely) is gone — Width/
+  Height/Unit are always visible and editable; presets just fill them
+  in. Fixes a latent bug where the dialog's own default (8×10in) didn't
+  match `CanvasSpec`'s dataclass default (16×20in) — the dialog now
+  seeds directly from `CanvasSpec()`.
+
+### Phase 6 — Interaction polish
+- Command palette (Ctrl+K / View menu): fuzzy-searchable list of every
+  menu action, built by walking the menu bar's own `QAction`s so it can
+  never drift out of sync with what the menus actually contain.
+- OS drag-and-drop image import onto the canvas (previously the file
+  dialog was the only way in); a multi-file import/drop is now one undo
+  step instead of one per file.
+- Live rubber-band preview line while placing the second point of a
+  movement line or light/shadow direction arrow — previously no
+  feedback existed between the two clicks at all.
+- Shift-snap rotation to 15° increments; dragging a reference image
+  snaps its center to the canvas center or another image's center
+  (Alt/Option bypasses it).
+- Real right-click context menus (Delete/Lock/Crop… on an item, Fit
+  Canvas/Cancel Tool on empty canvas) — right-click was previously dead
+  everywhere.
+
+### Phase 7 — Recent files & start screen
+- Recent files (`QSettings`-backed, capped at 10, `File > Open Recent`)
+  — there was no `QSettings` usage anywhere in the app before this and
+  no recent-files mechanism at all.
+- Thumbnails: `save_atelier`'s `thumbnail` parameter has existed since
+  v1.0 with nothing ever generating one. Every save now renders and
+  embeds a real `thumb.png`.
+- A start screen shown at launch when there's no crash to recover from
+  and at least one recent painting exists — real thumbnails, titled by
+  actual project name, with New Painting/Open…/Start Blank alternatives.
+  A fresh install with no recent files still opens straight to a blank
+  canvas with zero extra clicks.
+- Fixed the crash-recovery timing gap: the recovery snapshot used to be
+  deleted the instant either "Recover" or "Discard" was clicked, so a
+  second crash before the first post-recovery Save lost the work again
+  with no safety net in between. It's now only cleared by Discard (or a
+  failed read) immediately, or by an actual successful save on the
+  Recover path.
+
 ## Unreleased — new features
 
 - **Free corner-drag resize for reference images**: dragging a corner

@@ -2,13 +2,20 @@
 
 **From:** Senior Engineer
 **To:** Hunter (Art Director), ChatGPT (Producer/Product Designer)
-**Status:** For review — no V2 implementation has started
+**Status:** Phase 0 and most of Phase 1 below are now shipped (unreleased,
+see `CHANGELOG.md`) — this document's original assessment and phase plan
+are kept below as the historical record they were written as, with a
+status note against every item. **Section 7, added after the fact, is
+the current forward-looking roadmap** — read that first if you just want
+"what's next."
 
-This is the first deliverable requested before any V2 code gets written: an
-honest read on what v1.0 actually is under the hood, what that means for
-where we take it next, and a phased plan sized so each phase ships
-something real rather than one long rebuild. Sections 5 and 6 are where I
-need your calls before Phase 0 starts.
+This was the first deliverable requested before any V2 code got written: an
+honest read on what v1.0 actually was under the hood, what that meant for
+where to take it next, and a phased plan sized so each phase shipped
+something real rather than one long rebuild. Sections 5 and 6's open
+questions are mostly still live — they were never explicitly answered —
+but enough of Sections 3–4 shipped anyway that this needed a status pass
+rather than staying frozen as an unstarted proposal.
 
 ---
 
@@ -47,38 +54,43 @@ This is a sound foundation. Nothing here needs to be torn out for V2.
 
 ### What's missing that a "professional, polished" app needs
 
-- **No undo/redo.** Every mutation (move, scale, rotate, crop, delete,
-  lock, property edit) is applied directly and permanently. For a tool
-  people will spend hours in, this is the single biggest trust gap.
-- **No autosave / crash recovery.** Manual Save only.
-- **No automated tests.** Zero. Every fix so far has been manual
-  inspection + reasoning, including the click-to-select bug — which is a
-  symptom of a deeper issue (next point).
-- **Duplicated interaction logic.** Eight call sites across four files
-  hand-roll the same `mousePressEvent` override + selection call
-  (`ReferenceImageItem`, `FocalPointItem`, `MovementLineItem`, `NoteItem`,
-  `LightSourceItem`, `DirectionArrowItem`, `VanishingPointItem`,
-  `HorizonLineItem`). That's why the "can't select, only drag" bug could
-  exist in the first place, and why the fix had to be applied eight
-  separate times instead of once. This should be unified.
-- **No performance validation with real reference photo sizes.** Full-
-  resolution `QPixmap`s are held in memory per reference image with no
-  proxy/thumbnail strategy for on-screen display. Fine for a handful of
-  moderate images; untested for what an artist actually imports (a dozen
-  12+ MP phone photos).
-- **The Layers panel does two jobs.** It's simultaneously a layer
-  visibility/lock tree and a tool palette (the "+ Primary Focal" / "+
-  Light Source" style buttons live there). Functional, but it reads like
-  a debug panel, not a professional tool's UI.
-- **`thumb.png` is speced but unused.** The `.atelier` format already
-  reserves a thumbnail slot (`atelier_io.save_atelier` accepts one), but
-  nothing generates or reads it. A recent-projects screen is effectively
-  half-built already.
-- **Packaging is fragile and manual.** Getting a working, correctly-
-  iconed `.exe` took multiple rounds of debugging (venv activation,
-  `--collect-all PySide6`, `--add-data` for the icon to apply at runtime
-  and not just to the file, icon cache, file locks). None of that is
-  written down anywhere durable — it lived in a chat.
+*(Status against each item added — the assessment itself is left as
+originally written.)*
+
+- ✅ **Shipped.** ~~No undo/redo.~~ Every mutation (move, scale, rotate,
+  crop, delete, lock, property edit) is applied directly and permanently.
+  For a tool people will spend hours in, this is the single biggest trust
+  gap. → `QUndoStack` per project, content mutations only.
+- ✅ **Shipped.** ~~No autosave / crash recovery.~~ Manual Save only. →
+  periodic snapshot + recovery prompt; the recovery-deletion-timing gap
+  this created (see Section 7) is now also fixed.
+- ✅ **Shipped.** ~~No automated tests.~~ Zero. → 49 tests, run against
+  offscreen Qt; the click-to-select bug turned out to be one symptom of
+  selection not working *at all*, not "unreliably" — see Section 7.
+- ✅ **Shipped.** ~~Duplicated interaction logic.~~ Eight call sites
+  across four files hand-roll the same `mousePressEvent` override +
+  selection call. → unified into `InteractiveItem`
+  (`app/canvas/interactive_item.py`).
+- ⬜ **Still open.** No performance validation with real reference photo
+  sizes. Full-resolution `QPixmap`s are held in memory per reference
+  image with no proxy/thumbnail strategy for on-screen display. Fine for
+  a handful of moderate images; untested for what an artist actually
+  imports (a dozen 12+ MP phone photos). Carried into Section 7.
+- ✅ **Shipped, further than proposed.** ~~The Layers panel does two
+  jobs.~~ Simultaneously a layer visibility/lock tree and a tool palette,
+  reading like a debug panel. → rebuilt as the Project Panel: a real
+  outliner listing every placed item (not just references), search, and
+  the tool-activation buttons kept but demoted to a compact row rather
+  than being the panel's main content.
+- ✅ **Shipped.** ~~`thumb.png` is speced but unused.~~ → every save
+  renders and embeds a real thumbnail; a recent-projects start screen
+  uses it.
+- **Unchanged by design, not fixed.** Packaging is fragile and manual. →
+  investigated further and the conclusion changed: every *script* tried
+  around the spec file got flagged/blocked by Windows on this machine, so
+  the supported path is now deliberately a manual command sequence
+  (README's "Build a standalone .exe"), not a script. Revisit only if
+  that changes (see Section 7's packaging note).
 
 ### What should be removed
 
@@ -148,56 +160,77 @@ foundation, not replacing it.
 Ordered by user impact vs. dependency risk. Each phase should ship as a
 usable build, not a branch that sits unmerged.
 
-### Phase 0 — Foundation & Safety Net
+### Phase 0 — Foundation & Safety Net — ✅ done
 *Nothing here is visible as a "feature," but everything after this phase
 is safer and cheaper to build because of it.*
 
-- Undo/redo (`QUndoStack`) wired through all existing mutating actions
-- Autosave (periodic recovery snapshot, separate from manual Save)
-- Consolidate the eight duplicated interaction call sites into one shared
-  base
-- Canonical, versioned build script
-- Baseline automated tests for serialization + undo-stack behavior
+- ✅ Undo/redo (`QUndoStack`) wired through all existing mutating actions
+- ✅ Autosave (periodic recovery snapshot, separate from manual Save) —
+  plus a timing bug this created (recovery deleted before the artist's
+  first post-recovery save) found and fixed since
+- ✅ Consolidate the eight duplicated interaction call sites into one
+  shared base — and the deeper selection bug this consolidation exposed
+  is now also fixed (Section 7)
+- ⬜ Canonical, versioned build script — superseded by policy, see the
+  "Unchanged by design" note in Section 1
+- ✅ Baseline automated tests for serialization + undo-stack behavior —
+  49 tests as of this writing
 
-### Phase 1 — Workflow Polish
+### Phase 1 — Workflow Polish — ✅ done, one item partial
 *Highest visible-impact-per-effort phase; depends on Phase 0's command
 infrastructure to do move/edit actions correctly.*
 
-- Split Layers panel into Toolbar + Layers panel
-- Save-time thumbnail generation (format already supports it)
-- Recent Projects / start screen using those thumbnails
-- Properties panel visual pass: live numeric readouts, cleaner crop flow
+- ✅ Split Layers panel into Toolbar + Layers panel — went further: the
+  Layers panel became a real outliner (the Project Panel), not just a
+  visibility/lock tree
+- ✅ Save-time thumbnail generation (format already supports it)
+- ✅ Recent Projects / start screen using those thumbnails
+- 🟨 Properties panel visual pass: live numeric readouts ✅ (vanishing
+  point/horizon coordinates are now editable, not a read-only label);
+  cleaner crop flow — only partially: Escape now exits crop mode, but
+  the two-step Apply/Cancel button flow itself is unchanged. Candidate
+  for Section 7.
 
-### Phase 2 — Precision Tools for Traditional Painters
+### Phase 2 — Precision Tools for Traditional Painters — 🟨 partial
 *Directly serves the "prepare before you paint" mission; each is additive,
 doesn't touch existing layers.*
 
-- On-canvas ruler / angle measurement tool
-- Snapping (rule-of-thirds/golden-ratio intersections, angle snap on
-  rotate)
-- Non-destructive grayscale/value-check toggle for the reference layer
-- Optional: user-defined custom grid spacing beyond thirds/golden ratio
+- ⬜ On-canvas ruler / angle measurement tool — not started, carried into
+  Section 7
+- 🟨 Snapping — angle snap on rotate (Shift, 15°) ✅ and reference-image
+  center-to-center/center-to-canvas-center snapping shipped, but *not*
+  the rule-of-thirds/golden-ratio-intersection snapping this line
+  originally proposed, nor true edge-to-edge (vs. center) snapping —
+  both carried into Section 7
+- ⬜ Non-destructive grayscale/value-check toggle for the reference layer
+  — not started, carried into Section 7
+- ⬜ Optional: user-defined custom grid spacing beyond thirds/golden ratio
+  — not started (the *perspective* grid already had custom spacing
+  before this doc was written; this item is specifically about the
+  Guides layer's two fixed overlays)
 
-### Phase 3 — Projector Mode Pro
+### Phase 3 — Projector Mode Pro — ⬜ not started
 *Most technically involved phase — real geometric complexity (quad-warp
 homography), not just UI. Should only be scoped in if Section 5's
-question about it comes back "yes, this matters."*
+question about it comes back "yes, this matters."* Still an open
+question — see Section 6, item 1, still unanswered.
 
-- Corner-pin/keystone correction for off-axis projectors
-- Multi-monitor target selection for fullscreen
+- ⬜ Corner-pin/keystone correction for off-axis projectors
+- ⬜ Multi-monitor target selection for fullscreen
 
-### Phase 4 — Studio Features
+### Phase 4 — Studio Features — ⬜ not started
 *Evaluate after Phases 0–2 land and get used for real. Flagged explicitly
 because these are the features most likely to either earn their keep or
-turn into scope creep — see Section 5.*
+turn into scope creep — see Section 5.* Phases 0 and (mostly) 1 have now
+landed and been used for real; this phase is worth actually revisiting.
 
-- Project templates (save canvas + guide setup as a reusable starting
+- ⬜ Project templates (save canvas + guide setup as a reusable starting
   point)
-- Color eyedropper / swatch reference from imported photos
-- Multiple open projects (tabs) — **high complexity, changes the app's
+- ⬜ Color eyedropper / swatch reference from imported photos
+- ⬜ Multiple open projects (tabs) — **high complexity, changes the app's
   mental model from "one project, one window."** Not recommended without
   explicit sign-off; current workaround (launch the app again) may simply
-  be fine.
+  be fine. Still unanswered — see Section 6, item 5.
 
 ---
 
@@ -213,7 +246,10 @@ turn into scope creep — see Section 5.*
    it surface as "the app got slow" after Phase 2 ships.
 3. **Packaging fragility is a real cost, not a one-time annoyance.**
    Every future release repeats the icon/`--add-data`/`--collect-all`
-   debugging unless the build script is fixed once and reused.
+   debugging unless the build script is fixed once and reused. — ✅
+   `HappyBoyAtelier.spec` now bakes both fixes in permanently; what
+   didn't survive was the *script* wrapped around it (see Section 1's
+   packaging note) — the fixes themselves did.
 4. **Windows Defender/SmartScreen friction on distributed files.** This
    already happened to the `.bat` script. If V2 ships updates as raw
    `.exe`/`.zip` files, expect this to keep happening. Worth deciding now
@@ -250,7 +286,82 @@ turn into scope creep — see Section 5.*
    limitation worth the complexity, or whether it's fine as-is.
 6. **Any branding/identity work** (splash screen, credits, a proper name
    for the "recent projects" screen, etc.) you want folded into Phase 1's
-   UI polish while that work is already happening?
+   UI polish while that work is already happening? — the naming half
+   shipped ("Start Screen"); splash screen/credits are still open if
+   wanted.
+
+---
+
+## 7. Where things actually stand, and what's next
+
+Written after Phases 0 and most of 1 above shipped, plus a full
+ground-up UX/interaction audit that went beyond this document's original
+scope (see `CHANGELOG.md`'s "UX redesign" entry for the itemized list).
+The single biggest finding wasn't on this roadmap at all: item selection
+didn't actually work — at all, not "unreliably" — for any marker in the
+shipped app, which is now fixed at the root (`CanvasScene`'s own
+selection model, replacing Qt's, since `QGraphicsItem.setSelected()`
+never stuck for children of these `QGraphicsItemGroup` layers).
+
+### Carried forward from Sections 4–6, still genuinely open
+- On-canvas ruler/angle measurement tool (Phase 2)
+- Non-destructive grayscale/value-check toggle (Phase 2)
+- Rule-of-thirds/golden-ratio-intersection snapping, and true edge-to-
+  edge (not just center-to-center) reference-image snapping
+- Reference-image memory footprint / proxy-resolution strategy (Section
+  1, Section 5 item 2) — still genuinely unvalidated
+- Projector keystone/corner-pin + multi-monitor target selection (Phase
+  3) — still gated on Section 6 item 1's unanswered question
+- Templates, color eyedropper, multiple open projects/tabs (Phase 4) —
+  still gated on Section 6 items 4–5; worth actually re-proposing now
+  that Phases 0–1 are in real use, per this doc's own original plan
+- Installer vs. portable exe (Section 6 item 2) — still open, and more
+  pointed now that the build path is a manual command sequence by firm
+  policy rather than a placeholder
+
+### New, discovered while implementing the phases above
+Each of these was a deliberate, explicitly-flagged scope cut in its
+phase's own commit — not an oversight — kept here so they aren't lost:
+
+- **Drag-to-reorder within a layer** in the Project Panel. No layer
+  group class exposes a reorder operation yet; needs that added first,
+  then the tree's drag/drop wiring.
+- **True hover-reveal row icons** in the Project Panel (visibility/lock
+  icons only appearing on hover, per the original redesign vision).
+  Needs a custom `QTreeWidget` item delegate; the icons are small and
+  always-visible instead for now, which is a reasonable permanent state
+  too if hover-reveal turns out not to be worth the delegate complexity.
+- **Cleaner crop flow.** Carried over from Phase 1's "partial" status
+  above — Escape now exits crop mode, but entering/applying/cancelling
+  is still a three-button flow (Crop…/Apply Crop/Cancel) rather than a
+  more direct in-place drag-to-crop gesture.
+- **A cross-project reference library.** Right now every imported image
+  lives and dies inside one project's `.atelier` zip. A personal,
+  taggable collection independent of any one painting — drag into any
+  open project — would turn reference-gathering into an ongoing
+  practice instead of a per-painting chore, and is a natural complement
+  to the recent-files work in Phase 7.
+- **Folder-based sync** (point the app at a Dropbox/Drive/NAS folder,
+  treat `.atelier` files there like any other project) as a "work across
+  two machines" answer that doesn't compromise the "no cloud accounts"
+  design commitment, since there's no account or server involved — just
+  a folder the artist already trusts.
+- **Batch export presets** (save a named format/DPI/notes-on-off
+  configuration, reuse it across paintings) and a **bundled "critique
+  pack" export** (canvas render + planning notes, zipped for sending to
+  a mentor without handing over the live editable project).
+
+### A concrete next phase, if picking one
+Given what's already landed, the highest-leverage next slice is probably
+**"Phase 2, finished"**: the on-canvas measurement tool and the
+grayscale/value-check toggle are the two items this document's own
+Section 2 called out as scoring unusually well against the "does this
+help an artist create better or faster" test and *not yet started* —
+both are additive (don't touch existing layers), both fit the existing
+`InteractiveItem`/undo-stack/Project-Panel infrastructure directly, and
+neither is gated on an unanswered open question the way Phases 3–4 are.
+Section 6 items 1, 4, and 5 are still worth getting explicit answers on
+before scoping Phases 3–4, same as originally proposed.
 
 ---
 

@@ -76,23 +76,37 @@ over SSH. `tests/test_project.py` has no Qt dependency at all;
 
 ## Quick tour
 
-- **File > New Painting…** — choose a portrait/landscape/square preset or a
-  custom width/height/unit.
-- **Import** — bring in reference photos; each becomes its own object you
-  can drag, resize (corner handles — free by default, hold Shift to lock
-  proportions), rotate (handle above the image), or crop (Properties
-  panel).
-- **Layers & Tools** (left dock) — toggle visibility/lock per layer, and
-  place composition markers, perspective grids, and lighting notes.
-- **Properties** (right dock) — edit whatever is currently selected.
+- **Start screen** — on launch, if you have recent paintings, pick one by
+  its thumbnail, start a new one, or open something else. A fresh
+  install skips straight to a blank canvas.
+- **File > New Painting…** — width/height/unit are always visible and
+  editable; portrait/landscape/square presets just fill them in, no
+  separate "custom" mode to switch into.
+- **Import** — bring in reference photos via the dialog, or just drag
+  image files from your OS straight onto the canvas. Each becomes its
+  own object you can drag (snaps to the canvas center and to other
+  images' centers — hold Alt/Option to bypass), resize (corner
+  handles — free by default, hold Shift to lock proportions), rotate
+  (handle above the image, hold Shift to snap to 15°), or crop
+  (Properties panel, or right-click the image).
+- **Project Panel** (left dock) — one outliner: every layer, and every
+  item placed in it — not just reference images — as a named, searchable
+  row with inline visibility/lock toggles.
+- **Properties** (right dock) — edit whatever is currently selected;
+  select several items for relative opacity/scale nudges and alignment.
+- **Ctrl+K** — command palette, searches every menu action by name.
+- **Right-click** an item for Delete/Lock/Crop…, or empty canvas for Fit
+  Canvas.
 - **Mode > Lock Setup** — freezes every layer so nothing moves by accident
   once the plan is final.
 - **Mode > Enter Projector Mode (F5)** — fullscreen view of the reference
   layer with its own opacity/zoom/pan/rotation/flip and a Lock Projection
   toggle, for tracing the setup onto the physical canvas.
-- **File > Save / Open** — projects are single portable `.atelier` files;
-  reference images are embedded, never linked externally.
-- **File > Export…** — PNG, JPG, or a one-page PDF planning sheet.
+- **File > Save / Open / Open Recent** — projects are single portable
+  `.atelier` files; reference images are embedded, never linked
+  externally.
+- **File > Export…** — PNG, JPG, or a one-page PDF planning sheet, on one
+  panel with the destination pre-filled from the project name.
 
 ## What's intentionally not here
 
@@ -102,6 +116,12 @@ section of the product spec and `ARCHITECTURE.md`.
 
 ## Status
 
-**v1.0.0** — see `CHANGELOG.md`. Covers the full MVP workflow: create canvas
-→ import & arrange references → composition guides → perspective grids →
-lighting notes → save/reopen → projector mode → lock setup.
+**v1.0.0** was the last tagged release, covering the full MVP workflow:
+create canvas → import & arrange references → composition guides →
+perspective grids → lighting notes → save/reopen → projector mode → lock
+setup. Since then, an unreleased but substantial ground-up UX pass has
+landed — undo/redo, crash recovery, a real Project Panel outliner, a
+unified selection model, batch editing, a command palette, drag-and-drop
+import, and recent files with thumbnails, among other things. See
+`CHANGELOG.md` for the itemized history and `V2_ROADMAP.md` for what's
+still ahead.
