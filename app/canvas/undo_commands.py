@@ -1,0 +1,184 @@
+"""Undo/redo command classes for CanvasScene's QUndoStack.
+
+Scope (per Phase 0 decision): the undo stack covers content mutations only
+— adding/removing objects, moving/scaling/rotating, cropping, text edits,
+perspective changes, and artwork-related numeric properties (opacity, grid
+line weight, grid spacing). Lock toggles, visibility toggles, and other UI/
+workflow state are deliberately excluded — undo represents reversing
+changes to the artwork setup, not general application state, so those
+stay direct, un-undoable calls at their call sites.
+
+Every command here follows the same "capture on press, commit a single
+command on release, only if something changed" shape described in
+PHASE_0_PLAN.md, rather than pushing one command per intermediate drag
+event.
+"""
+
+from __future__ import annotations
+
+from PySide6.QtGui import QUndoCommand
+
+
+class AddItemCommand(QUndoCommand):
+    """Adds `item` to `group` on redo, removes it on undo. `group` must
+    expose `add_existing(item)` and `remove_item(item)`.
+    """
+
+    def __init__(self, group, item, label: str = "Add item"):
+        super().__init__(label)
+        self._group = group
+        self._item = item
+
+    def redo(self) -> None:
+        self._group.add_existing(self._item)
+
+    def undo(self) -> None:
+        self._group.remove_item(self._item)
+
+
+class DeleteItemCommand(QUndoCommand):
+    """Mirror image of AddItemCommand — removes on redo, restores on undo."""
+
+    def __init__(self, group, item, label: str = "Delete item"):
+        super().__init__(label)
+        self._group = group
+        self._item = item
+
+    def redo(self) -> None:
+        self._group.remove_item(self._item)
+
+    def undo(self) -> None:
+        self._group.add_existing(self._item)
+
+
+class TransformCommand(QUndoCommand):
+    """Generic old/new (pos, rotation, scale) for whole-item moves and
+    handle-driven scale/rotate. `old_state`/`new_state` are
+    (QPointF, float, scale) tuples as produced by a class's
+    _snapshot_transform() — `scale` is a single float for most items
+    (InteractiveItem's default, using Qt's native uniform scale()), or an
+    (scale_x, scale_y) tuple for items that support independent per-axis
+    resize (ReferenceImageItem's override — see canvas/resize_math.py).
+    """
+
+    def __init__(self, item, old_state, new_state, label: str = "Transform"):
+        super().__init__(label)
+        self._item = item
+        self._old = old_state
+        self._new = new_state
+
+    def _apply(self, state) -> None:
+        pos, rotation, scale = state
+        self._item.setPos(pos)
+        self._item.setRotation(rotation)
+        if isinstance(scale, tuple):
+            self._item.set_scale_xy(*scale)
+        elif hasattr(self._item, "set_scale_factor"):
+            self._item.set_scale_factor(scale)
+        else:
+            self._item.setScale(scale)
+        handles = getattr(self._item, "_handles", None)
+        if handles is not None:
+            handles.reposition()
+
+    def redo(self) -> None:
+        self._apply(self._new)
+
+    def undo(self) -> None:
+        self._apply(self._old)
+
+
+class CropItemCommand(QUndoCommand):
+    """Old/new crop QRect for a ReferenceImageItem, pushed at Apply Crop —
+    not on every crop-handle drag.
+    """
+
+    def __init__(self, item, old_crop, new_crop, label: str = "Crop image"):
+        super().__init__(label)
+        self._item = item
+        self._old = old_crop
+        self._new = new_crop
+
+    def redo(self) -> None:
+        self._item.set_crop(self._new)
+
+    def undo(self) -> None:
+        self._item.set_crop(self._old)
+
+
+class SetNoteTextCommand(QUndoCommand):
+    """Old/new text for a NoteItem, committed when editing ends (focus
+    lost, or Escape/Enter) — not per keystroke.
+    """
+
+    def __init__(self, item, old_text: str, new_text: str, label: str = "Edit note text"):
+        super().__init__(label)
+        self._item = item
+        self._old = old_text
+        self._new = new_text
+
+    def redo(self) -> None:
+        self._item.set_text(self._new)
+
+    def undo(self) -> None:
+        self._item.set_text(self._old)
+
+
+class SetPerspectiveModeCommand(QUndoCommand):
+    """Captures the *current* mode's VP positions and horizon Y before
+    switching, so undo restores them exactly rather than regenerating
+    fresh defaults (today, switching 1pt -> 2pt -> 1pt loses the original
+    1pt VP position; this command makes at least the undo path lossless).
+    """
+
+    def __init__(self, layer, old_mode, old_horizon_y, old_vp_positions, new_mode,
+                 label: str = "Change perspective mode"):
+        super().__init__(label)
+        self._layer = layer
+        self._old_mode = old_mode
+        self._old_horizon_y = old_horizon_y
+        self._old_vp_positions = list(old_vp_positions)
+        self._new_mode = new_mode
+        self._new_horizon_y = None
+        self._new_vp_positions = None
+
+    def redo(self) -> None:
+        self._layer.set_mode(self._new_mode)
+        if self._new_vp_positions is None:
+            # First time through: capture the freshly-generated defaults so
+            # a later redo (after an undo) restores this exact state
+            # instead of re-generating a (possibly different) default.
+            self._new_horizon_y = self._layer.horizon.pos().y()
+            self._new_vp_positions = [vp.pos() for vp in self._layer.vps]
+        else:
+            self._layer.horizon.setPos(0, self._new_horizon_y)
+            for vp, pos in zip(self._layer.vps, self._new_vp_positions):
+                vp.setPos(pos)
+        self._layer.grid.update()
+
+    def undo(self) -> None:
+        self._layer.set_mode(self._old_mode)
+        self._layer.horizon.setPos(0, self._old_horizon_y)
+        for vp, pos in zip(self._layer.vps, self._old_vp_positions):
+            vp.setPos(pos)
+        self._layer.grid.update()
+
+
+class SetPropertyCommand(QUndoCommand):
+    """Generic single-value property change: opacity, grid line weight,
+    grid spacing, arrow endpoints, scale, rotation, and similar. `setter`
+    is a one-argument callable; `old_value`/`new_value` are whatever it
+    accepts.
+    """
+
+    def __init__(self, setter, old_value, new_value, label: str = "Change property"):
+        super().__init__(label)
+        self._setter = setter
+        self._old = old_value
+        self._new = new_value
+
+    def redo(self) -> None:
+        self._setter(self._new)
+
+    def undo(self) -> None:
+        self._setter(self._old)
