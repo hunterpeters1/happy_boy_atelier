@@ -15,7 +15,7 @@ visible instead).
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -85,6 +85,8 @@ class _RowButtons(QWidget):
         layout.addStretch(1)
         if show_visibility:
             self.eye_btn = QToolButton()
+            self.eye_btn.setProperty("role", "compact")
+            self.eye_btn.setIconSize(QSize(15, 15))
             self.eye_btn.setCheckable(True)
             self.eye_btn.setChecked(visible)
             self.eye_btn.setIcon(icons.icon("eye"))
@@ -94,6 +96,8 @@ class _RowButtons(QWidget):
             layout.addWidget(self.eye_btn)
         if show_lock:
             self.lock_btn = QToolButton()
+            self.lock_btn.setProperty("role", "compact")
+            self.lock_btn.setIconSize(QSize(15, 15))
             self.lock_btn.setCheckable(True)
             self.lock_btn.setChecked(locked)
             self.lock_btn.setIcon(icons.icon("lock" if locked else "unlock"))
@@ -148,7 +152,13 @@ class LayersPanel(QWidget):
         self.tree.setColumnCount(2)
         self.tree.setIndentation(14)
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.tree.setUniformRowHeights(True)
+        # NOT uniform: rows genuinely vary — most are a single icon+label,
+        # but the tool-activation rows and the perspective settings form
+        # are taller multi-widget content. setUniformRowHeights(True) makes
+        # Qt skip per-item size-hint computation entirely for performance,
+        # which was silently crushing every one of those rows to the
+        # single-line row height regardless of what _set_row_widget() set.
+        self.tree.setUniformRowHeights(False)
         self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.Fixed)
         self.tree.setColumnWidth(1, 56)
@@ -200,6 +210,16 @@ class LayersPanel(QWidget):
         self._sync_selection_highlight()
         self._apply_search_filter()
 
+    @staticmethod
+    def _set_row_widget(row: QTreeWidgetItem, column: int, widget: QWidget) -> None:
+        """setItemWidget() alone does not grow the row to fit an embedded
+        widget taller than plain text — every multi-button/multi-control
+        row (tool-activation buttons, the perspective settings form, the
+        import row) rendered crushed to a sliver without this.
+        """
+        row.setSizeHint(column, widget.sizeHint())
+        row.treeWidget().setItemWidget(row, column, widget)
+
     def _build_layer(self, kind: LayerKind, icon_name: str, group, populate_fn, *, show_lock: bool = True) -> None:
         row = QTreeWidgetItem(self.tree)
         row.setIcon(0, icons.icon(icon_name))
@@ -214,7 +234,7 @@ class LayersPanel(QWidget):
         buttons.visibility_toggled.connect(group.setVisible)
         if show_lock:
             buttons.lock_toggled.connect(lambda on, k=kind: self.scene.set_layer_locked(k, on))
-        self.tree.setItemWidget(row, 1, buttons)
+        self._set_row_widget(row, 1, buttons)
 
         populate_fn(row)
 
@@ -229,7 +249,7 @@ class LayersPanel(QWidget):
         buttons = _RowButtons(visible=obj.isVisible(), locked=obj.is_locked())
         buttons.visibility_toggled.connect(obj.setVisible)
         buttons.lock_toggled.connect(obj.set_locked)
-        self.tree.setItemWidget(row, 1, buttons)
+        self._set_row_widget(row, 1, buttons)
         return row
 
     def _add_tool_row(self, parent: QTreeWidgetItem, tools: list[tuple[str, str, str]]) -> None:
@@ -242,7 +262,7 @@ class LayersPanel(QWidget):
         for tool, icon_name, tooltip in tools:
             layout.addWidget(self._make_tool_button(tool, icon_name, tooltip))
         layout.addStretch(1)
-        self.tree.setItemWidget(row, 0, widget)
+        self._set_row_widget(row, 0, widget)
 
     def _add_toggle_row(self, parent: QTreeWidgetItem, label: str, checked: bool, on_toggled) -> None:
         row = QTreeWidgetItem(parent)
@@ -254,7 +274,7 @@ class LayersPanel(QWidget):
         box.toggled.connect(on_toggled)
         layout.addWidget(box)
         layout.addStretch(1)
-        self.tree.setItemWidget(row, 0, widget)
+        self._set_row_widget(row, 0, widget)
 
     # -- Reference ------------------------------------------------------
     def _populate_reference(self, parent: QTreeWidgetItem) -> None:
@@ -263,6 +283,8 @@ class LayersPanel(QWidget):
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 2, 0, 2)
         add_btn = QToolButton()
+        add_btn.setProperty("role", "compact")
+        add_btn.setIconSize(QSize(16, 16))
         add_btn.setIcon(icons.icon("import"))
         add_btn.setAutoRaise(True)
         add_btn.setToolTip("Import reference image(s)…")
@@ -270,7 +292,7 @@ class LayersPanel(QWidget):
         layout.addWidget(add_btn)
         layout.addWidget(QLabel("Import reference image(s)…"))
         layout.addStretch(1)
-        self.tree.setItemWidget(row, 0, widget)
+        self._set_row_widget(row, 0, widget)
 
         for image in self.scene.reference_layer.items():
             self._add_item_row(parent, image)
@@ -294,7 +316,7 @@ class LayersPanel(QWidget):
     # -- Perspective --------------------------------------------------------
     def _populate_perspective(self, parent: QTreeWidgetItem) -> None:
         row = QTreeWidgetItem(parent)
-        self.tree.setItemWidget(row, 0, self._build_perspective_settings_widget())
+        self._set_row_widget(row, 0, self._build_perspective_settings_widget())
 
         layer = self.scene.perspective_layer
         self._add_item_row(parent, layer.horizon)
@@ -482,6 +504,8 @@ class LayersPanel(QWidget):
     # -- tool activation (single-select across all tool buttons) ----------
     def _make_tool_button(self, tool: str, icon_name: str, tooltip: str) -> QToolButton:
         btn = QToolButton()
+        btn.setProperty("role", "compact")
+        btn.setIconSize(QSize(16, 16))
         btn.setIcon(icons.icon(icon_name))
         btn.setCheckable(True)
         btn.setAutoRaise(True)

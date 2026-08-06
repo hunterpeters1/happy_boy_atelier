@@ -106,6 +106,22 @@ def _stylesheet() -> str:
         border: 1px solid {C.COLOR_BRASS_BRIGHT};
     }}
 
+    /* Compact inline row icon buttons (Project Panel: tool-activation
+    buttons, per-row eye/lock toggles, the import row) — deliberately NOT
+    the main toolbar's larger padding above. Several of these sit four
+    abreast in a narrow dock column; at the main toolbar's padding, a
+    tightly-packed row of them was being squeezed by Qt's Fusion style
+    below the minimum content rect it needs to paint an icon at all,
+    rendering as blank. */
+    QToolButton[role="compact"] {{
+        padding: 3px;
+    }}
+    QToolButton[role="compact"]:checked {{
+        background: {C.COLOR_BRASS};
+        color: {C.COLOR_BG_DARKEST};
+        border: 1px solid {C.COLOR_BRASS_BRIGHT};
+    }}
+
     QStatusBar {{
         background: {C.COLOR_BG_DARKEST};
         border-top: 1px solid {C.COLOR_LINE};
