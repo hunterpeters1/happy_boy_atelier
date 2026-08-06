@@ -64,9 +64,14 @@ class ReferenceImageItem(InteractiveItem):
     """A single reference photo/object placed on the drafting table."""
 
     def __init__(self, image_id: str, source_pixmap: QPixmap, base_w: float, base_h: float,
-                 crop: QRect | None = None, parent=None):
+                 crop: QRect | None = None, display_name: str | None = None, parent=None):
         super().__init__(parent)
         self.image_id = image_id
+        # The Project Panel lists this by display_name rather than a
+        # positional "Reference 1/2/3" placeholder — falls back to the
+        # image_id (still unique, just not human-friendly) for projects
+        # saved before this field existed.
+        self.display_name = display_name or image_id
         self._source_pixmap = source_pixmap
         self._base_w = base_w
         self._base_h = base_h
@@ -378,6 +383,7 @@ class ReferenceImageItem(InteractiveItem):
         pos = self.pos()
         return {
             "id": self.image_id,
+            "name": self.display_name,
             "x": pos.x(), "y": pos.y(),
             "rotation": self.rotation(),
             # "scale" is a legacy single-value field kept for older
@@ -403,6 +409,8 @@ class ReferenceImageItem(InteractiveItem):
             base_w=float(d.get("base_w", source_pixmap.width())),
             base_h=float(d.get("base_h", source_pixmap.height())),
             crop=QRect(*crop_vals),
+            # Older files (saved before "name" existed) fall back to the id.
+            display_name=d.get("name") or d["id"],
         )
         item.setPos(float(d.get("x", 0)), float(d.get("y", 0)))
         item.setRotation(float(d.get("rotation", 0)))
@@ -449,7 +457,7 @@ class ReferenceLayerGroup(QGraphicsItemGroup):
         self._items: list[ReferenceImageItem] = []
 
     def build_image_item(self, pixmap: QPixmap, canvas_w_scene: float, canvas_h_scene: float,
-                          scene_center: QPointF) -> ReferenceImageItem:
+                          scene_center: QPointF, display_name: str | None = None) -> ReferenceImageItem:
         """Construct a new item positioned and sized as a fresh import,
         without adding it to the group yet. Used by callers that want to
         route the add through the undo stack (AddItemCommand calls
@@ -457,13 +465,13 @@ class ReferenceLayerGroup(QGraphicsItemGroup):
         non-undoable convenience wrapper for internal/deserialization use.
         """
         base_w, base_h = fit_base_size(pixmap, canvas_w_scene, canvas_h_scene)
-        item = ReferenceImageItem(str(uuid.uuid4()), pixmap, base_w, base_h)
+        item = ReferenceImageItem(str(uuid.uuid4()), pixmap, base_w, base_h, display_name=display_name)
         item.setPos(scene_center)
         return item
 
     def add_image(self, pixmap: QPixmap, canvas_w_scene: float, canvas_h_scene: float,
-                   scene_center: QPointF) -> ReferenceImageItem:
-        item = self.build_image_item(pixmap, canvas_w_scene, canvas_h_scene, scene_center)
+                   scene_center: QPointF, display_name: str | None = None) -> ReferenceImageItem:
+        item = self.build_image_item(pixmap, canvas_w_scene, canvas_h_scene, scene_center, display_name)
         self.add_existing(item)
         return item
 

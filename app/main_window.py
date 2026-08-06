@@ -164,7 +164,12 @@ class MainWindow(QMainWindow):
 
         self.layers_panel = LayersPanel(scene, self)
         self.layers_panel.request_import.connect(self.import_images)
-        self.layers_dock = QDockWidget("Layers && Tools", self)
+        # Tree-selection <-> canvas-selection is two-way: clicking a row
+        # drives scene.set_selection() (inside the panel itself), and this
+        # is the other direction — a canvas click highlights the matching
+        # row without tearing down and rebuilding the whole tree.
+        scene.selection_changed.connect(self.layers_panel._sync_selection_highlight)
+        self.layers_dock = QDockWidget("Project", self)
         self.layers_dock.setWidget(self.layers_panel)
         self.layers_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.layers_dock)
@@ -369,7 +374,9 @@ class MainWindow(QMainWindow):
             if pixmap.isNull():
                 continue
             offset_center = center + QPointF(cascade * 18, cascade * 18)
-            item = self.scene.reference_layer.build_image_item(pixmap, rect.width(), rect.height(), offset_center)
+            item = self.scene.reference_layer.build_image_item(
+                pixmap, rect.width(), rect.height(), offset_center, display_name=Path(path).name
+            )
             self.scene.undo_stack.push(AddItemCommand(self.scene.reference_layer, item, "Add reference image"))
             cascade += 1
         self.layers_panel.refresh_reference_list()

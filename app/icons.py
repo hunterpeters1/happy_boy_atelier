@@ -41,6 +41,8 @@ _SHAPES: dict[str, str] = {
     "search": '<circle cx="8.5" cy="8.5" r="5.5"/><path d="m17 17-4-4"/>',
     "eye": '<path d="M1 10s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="10" cy="10" r="2.6"/>',
     "chevron": '<path d="m6 4 6 6-6 6"/>',
+    "image": '<rect x="2" y="3" width="16" height="14" rx="1"/><circle cx="7" cy="8" r="1.6"/><path d="m3 15 5-5 3 3 3-4 5 6"/>',
+    "shapes": '<circle cx="6.5" cy="6.5" r="3.3"/><rect x="11" y="3.2" width="6" height="6"/><path d="M6.5 12 2.5 18h8Z"/>',
 }
 
 

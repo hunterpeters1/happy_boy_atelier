@@ -243,6 +243,9 @@ class PerspectiveLayerGroup(QGraphicsItemGroup):
         self._opacity = value
         self.setOpacity(value)
 
+    def layer_opacity(self) -> float:
+        return self._opacity
+
     def set_layer_locked(self, locked: bool) -> None:
         self._locked = locked
         for item in (self.horizon, *self.vps):

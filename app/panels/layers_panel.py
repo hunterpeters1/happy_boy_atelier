@@ -1,63 +1,110 @@
-"""Layers & Tools dock: per-layer visibility/lock, the reference image
-list, and the placement tools for composition/perspective/lighting/guides.
+"""Project Panel: one outliner listing every layer and every item placed
+on the drafting table, replacing five separate fixed sections. Every
+placed item — not just reference images — is a named, selectable row with
+inline visibility/lock toggles, plus a live search filter across the
+whole painting.
 
-This panel talks to the CanvasScene directly rather than bouncing every
-toggle through MainWindow — keeps the wiring short for a single-scene app.
+Two things the redesign dossier's vision calls for are deliberately not
+in this pass: drag-to-reorder within a layer (none of the layer group
+classes expose a reorder operation yet — faking the drag visuals with no
+backend effect would be worse than not having it) and true hover-reveal
+icons (QTreeWidget doesn't support per-row hover visibility cheaply
+without a custom item delegate; the eye/lock icons are small and always
+visible instead).
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QCheckBox,
-    QComboBox,
     QDoubleSpinBox,
-    QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
-    QPushButton,
+    QLineEdit,
     QRadioButton,
-    QScrollArea,
     QSlider,
     QSpinBox,
     QToolButton,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from .. import constants as C
+from .. import icons
 from ..constants import LayerKind, PerspectiveMode
 from ..canvas.undo_commands import SetPerspectiveModeCommand, SetPropertyCommand
+from ..layers.reference_layer import ReferenceImageItem
+from ..layers.composition_layer import FocalPointItem, MovementLineItem, NoteItem
+from ..layers.lighting_layer import LightSourceItem, DirectionArrowItem
+from ..layers.perspective_layer import VanishingPointItem, HorizonLineItem
+
+_ROLE_ITEM = Qt.UserRole
 
 
-def _hline_label(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setProperty("role", "hint")
-    return lbl
+def _row_icon_and_label(item) -> tuple[str, str]:
+    if isinstance(item, ReferenceImageItem):
+        return "image", item.display_name
+    if isinstance(item, FocalPointItem):
+        return "focal", f"Focal point · {item.kind}"
+    if isinstance(item, MovementLineItem):
+        return "movement", "Movement line"
+    if isinstance(item, NoteItem):
+        text = item.text().strip() or "Note"
+        return "note", (text if len(text) <= 32 else text[:31] + "…")
+    if isinstance(item, LightSourceItem):
+        return "light", "Light source"
+    if isinstance(item, DirectionArrowItem):
+        return ("light" if item.kind == "light" else "shadow"), f"{item.kind.title()} direction"
+    if isinstance(item, VanishingPointItem):
+        return "vanishing", f"Vanishing point ({item.label})"
+    if isinstance(item, HorizonLineItem):
+        return "vanishing", "Horizon line"
+    return "shapes", type(item).__name__
 
 
-class _LayerHeader(QWidget):
+class _RowButtons(QWidget):
+    """The eye/lock toggle pair used as column 1's item widget for both
+    layer-header rows and individual item rows.
+    """
+
     visibility_toggled = Signal(bool)
     lock_toggled = Signal(bool)
 
-    def __init__(self, title: str, parent=None):
+    def __init__(self, *, visible: bool, locked: bool, show_visibility: bool = True,
+                 show_lock: bool = True, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        label = QLabel(title)
-        label.setProperty("role", "section")
-        self.visible_box = QCheckBox("Visible")
-        self.visible_box.setChecked(True)
-        self.lock_box = QCheckBox("Locked")
-        layout.addWidget(label)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(2)
         layout.addStretch(1)
-        layout.addWidget(self.visible_box)
-        layout.addWidget(self.lock_box)
-        self.visible_box.toggled.connect(self.visibility_toggled)
-        self.lock_box.toggled.connect(self.lock_toggled)
+        if show_visibility:
+            self.eye_btn = QToolButton()
+            self.eye_btn.setCheckable(True)
+            self.eye_btn.setChecked(visible)
+            self.eye_btn.setIcon(icons.icon("eye"))
+            self.eye_btn.setAutoRaise(True)
+            self.eye_btn.setToolTip("Visible")
+            self.eye_btn.toggled.connect(self.visibility_toggled)
+            layout.addWidget(self.eye_btn)
+        if show_lock:
+            self.lock_btn = QToolButton()
+            self.lock_btn.setCheckable(True)
+            self.lock_btn.setChecked(locked)
+            self.lock_btn.setIcon(icons.icon("lock" if locked else "unlock"))
+            self.lock_btn.setAutoRaise(True)
+            self.lock_btn.setToolTip("Locked")
+            self.lock_btn.toggled.connect(self._on_lock_toggled)
+            self.lock_btn.toggled.connect(self.lock_toggled)
+            layout.addWidget(self.lock_btn)
+
+    def _on_lock_toggled(self, on: bool) -> None:
+        self.lock_btn.setIcon(icons.icon("lock" if on else "unlock"))
 
 
 class LayersPanel(QWidget):
@@ -68,117 +115,190 @@ class LayersPanel(QWidget):
         super().__init__(parent)
         self.scene = scene
         self._tool_buttons: dict[str, QToolButton] = {}
+        self._row_for_obj: dict[int, QTreeWidgetItem] = {}
+        self._layer_rows: dict[LayerKind, QTreeWidgetItem] = {}
+        self._expanded_default: dict[LayerKind, bool] = {kind: True for kind in C.LAYER_ORDER}
+        self._syncing_selection = False
 
         # Lazy "before this edit session" baselines for undo-commit-on-
         # release, mirroring InteractiveItem's press/release pattern but
-        # for spin boxes (which have no press/release signals — see
-        # _*_editing_finished below).
+        # for spin boxes (which have no press/release signals).
         self._spacing_baseline: int | None = None
         self._spacing_last = 12
         self._line_width_baseline: float | None = None
-        self._line_width_last = 2.0  # matches line_width_spin's initial value, set below
+        self._line_width_last = 2.0
         self._perspective_opacity_baseline: float | None = None
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 6, 6, 6)
+        outer.setSpacing(6)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        outer.addWidget(scroll)
+        search_row = QHBoxLayout()
+        search_icon = QLabel()
+        search_icon.setPixmap(icons.icon("search", 14).pixmap(14, 14))
+        search_row.addWidget(search_icon)
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search this painting…")
+        self.search_edit.textChanged.connect(self._apply_search_filter)
+        search_row.addWidget(self.search_edit)
+        outer.addLayout(search_row)
 
-        content = QWidget()
-        scroll.setWidget(content)
-        self._layout = QVBoxLayout(content)
-        self._layout.setSpacing(10)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.setColumnCount(2)
+        self.tree.setIndentation(14)
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tree.setUniformRowHeights(True)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.tree.setColumnWidth(1, 56)
+        self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
+        outer.addWidget(self.tree, 1)
 
-        self._build_reference_section()
-        self._build_composition_section()
-        self._build_perspective_section()
-        self._build_lighting_section()
-        self._build_guides_section()
-        self._layout.addStretch(1)
+        self.refresh_structure()
 
-    # -- Reference ----------------------------------------------------
-    def _build_reference_section(self) -> None:
-        box = QGroupBox("Reference")
-        v = QVBoxLayout(box)
-        header = _LayerHeader("Images")
-        header.visibility_toggled.connect(self.scene.reference_layer.set_layer_visible)
-        header.lock_toggled.connect(lambda on: self.scene.set_layer_locked(LayerKind.REFERENCE, on))
-        v.addWidget(header)
+    # -- structural rebuild -------------------------------------------------
+    def refresh_structure(self) -> None:
+        """Full rebuild from current scene state. Covers what the old
+        per-section refresh_reference_list()/sync_from_scene() each did
+        separately — both now alias to this, see bottom of the class.
+        """
+        for kind, row in self._layer_rows.items():
+            self._expanded_default[kind] = row.isExpanded()
 
-        self.ref_list = QListWidget()
-        self.ref_list.setMaximumHeight(140)
-        self.ref_list.itemSelectionChanged.connect(self._on_ref_list_selection)
-        v.addWidget(self.ref_list)
+        self.tree.clear()
+        self._row_for_obj = {}
+        self._layer_rows = {}
+        self._tool_buttons = {}
 
-        row = QHBoxLayout()
-        import_btn = QPushButton("Import Image…")
-        import_btn.clicked.connect(self.request_import.emit)
-        row.addWidget(import_btn)
-        v.addLayout(row)
-        v.addWidget(_hline_label("Select an image here or on canvas to edit it in Properties."))
+        self._build_layer(LayerKind.REFERENCE, "image", self.scene.reference_layer, self._populate_reference)
+        self._build_layer(LayerKind.COMPOSITION, "shapes", self.scene.composition_layer, self._populate_composition)
+        self._build_layer(LayerKind.PERSPECTIVE, "vanishing", self.scene.perspective_layer, self._populate_perspective)
+        self._build_layer(LayerKind.LIGHTING, "light", self.scene.lighting_layer, self._populate_lighting)
+        self._build_layer(
+            LayerKind.GUIDES, "shapes", self.scene.guides_layer, self._populate_guides, show_lock=False
+        )
 
-        self._layout.addWidget(box)
+        self._sync_selection_highlight()
+        self._apply_search_filter()
 
-    def refresh_reference_list(self) -> None:
-        self.ref_list.blockSignals(True)
-        self.ref_list.clear()
-        for i, item in enumerate(self.scene.reference_layer.items()):
-            entry = QListWidgetItem(f"Reference {i + 1}")
-            entry.setData(Qt.UserRole, item)
-            self.ref_list.addItem(entry)
-        self.ref_list.blockSignals(False)
+    def _build_layer(self, kind: LayerKind, icon_name: str, group, populate_fn, *, show_lock: bool = True) -> None:
+        row = QTreeWidgetItem(self.tree)
+        row.setIcon(0, icons.icon(icon_name))
+        row.setText(0, C.LAYER_LABELS[kind])
+        font = row.font(0)
+        font.setBold(True)
+        row.setFont(0, font)
+        row.setExpanded(self._expanded_default.get(kind, True))
+        self._layer_rows[kind] = row
 
-    def _on_ref_list_selection(self) -> None:
-        selected = self.ref_list.selectedItems()
-        items = [entry.data(Qt.UserRole) for entry in selected]
-        items = [item for item in items if item is not None]
-        self.scene.set_selection(items)
+        buttons = _RowButtons(visible=group.isVisible(), locked=self.scene.layer_locked(kind), show_lock=show_lock)
+        buttons.visibility_toggled.connect(group.setVisible)
+        if show_lock:
+            buttons.lock_toggled.connect(lambda on, k=kind: self.scene.set_layer_locked(k, on))
+        self.tree.setItemWidget(row, 1, buttons)
 
-    # -- Composition ----------------------------------------------------
-    def _build_composition_section(self) -> None:
-        box = QGroupBox("Composition")
-        v = QVBoxLayout(box)
-        header = _LayerHeader("Guides & Markers")
-        header.visibility_toggled.connect(self.scene.composition_layer.setVisible)
-        header.lock_toggled.connect(lambda on: self.scene.set_layer_locked(LayerKind.COMPOSITION, on))
-        v.addWidget(header)
+        populate_fn(row)
 
-        grid = QHBoxLayout()
-        for label, tool in [
-            ("+ Primary Focal", "focal_primary"),
-            ("+ Secondary Focal", "focal_secondary"),
-        ]:
-            grid.addWidget(self._make_tool_button(label, tool))
-        v.addLayout(grid)
+    def _add_item_row(self, parent: QTreeWidgetItem, obj) -> QTreeWidgetItem:
+        icon_name, label = _row_icon_and_label(obj)
+        row = QTreeWidgetItem(parent)
+        row.setIcon(0, icons.icon(icon_name))
+        row.setText(0, label)
+        row.setData(0, _ROLE_ITEM, obj)
+        self._row_for_obj[id(obj)] = row
 
-        grid2 = QHBoxLayout()
-        for label, tool in [
-            ("+ Movement Line", "movement_line"),
-            ("+ Note", "note_comp"),
-        ]:
-            grid2.addWidget(self._make_tool_button(label, tool))
-        v.addLayout(grid2)
-        v.addWidget(_hline_label("Two-point tools: click a start, then an end point."))
+        buttons = _RowButtons(visible=obj.isVisible(), locked=obj.is_locked())
+        buttons.visibility_toggled.connect(obj.setVisible)
+        buttons.lock_toggled.connect(obj.set_locked)
+        self.tree.setItemWidget(row, 1, buttons)
+        return row
 
-        self._layout.addWidget(box)
+    def _add_tool_row(self, parent: QTreeWidgetItem, tools: list[tuple[str, str, str]]) -> None:
+        """tools: list of (tool_id, icon_name, tooltip)."""
+        row = QTreeWidgetItem(parent)
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(2)
+        for tool, icon_name, tooltip in tools:
+            layout.addWidget(self._make_tool_button(tool, icon_name, tooltip))
+        layout.addStretch(1)
+        self.tree.setItemWidget(row, 0, widget)
 
-    # -- Perspective ------------------------------------------------------
-    def _build_perspective_section(self) -> None:
-        box = QGroupBox("Perspective")
-        v = QVBoxLayout(box)
-        header = _LayerHeader("Grid")
-        header.visibility_toggled.connect(self.scene.perspective_layer.set_layer_visible)
-        header.lock_toggled.connect(lambda on: self.scene.set_layer_locked(LayerKind.PERSPECTIVE, on))
-        v.addWidget(header)
+    def _add_toggle_row(self, parent: QTreeWidgetItem, label: str, checked: bool, on_toggled) -> None:
+        row = QTreeWidgetItem(parent)
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 2, 0, 2)
+        box = QCheckBox(label)
+        box.setChecked(checked)
+        box.toggled.connect(on_toggled)
+        layout.addWidget(box)
+        layout.addStretch(1)
+        self.tree.setItemWidget(row, 0, widget)
+
+    # -- Reference ------------------------------------------------------
+    def _populate_reference(self, parent: QTreeWidgetItem) -> None:
+        row = QTreeWidgetItem(parent)
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 2, 0, 2)
+        add_btn = QToolButton()
+        add_btn.setIcon(icons.icon("import"))
+        add_btn.setAutoRaise(True)
+        add_btn.setToolTip("Import reference image(s)…")
+        add_btn.clicked.connect(self.request_import.emit)
+        layout.addWidget(add_btn)
+        layout.addWidget(QLabel("Import reference image(s)…"))
+        layout.addStretch(1)
+        self.tree.setItemWidget(row, 0, widget)
+
+        for image in self.scene.reference_layer.items():
+            self._add_item_row(parent, image)
+
+    # -- Composition ------------------------------------------------------
+    def _populate_composition(self, parent: QTreeWidgetItem) -> None:
+        self._add_tool_row(parent, [
+            ("focal_primary", "focal", "Add primary focal point"),
+            ("focal_secondary", "focal", "Add secondary focal point"),
+            ("movement_line", "movement", "Add movement line — click a start point, then an end point"),
+            ("note_comp", "note", "Add note"),
+        ])
+        layer = self.scene.composition_layer
+        for fp in layer.focal_points:
+            self._add_item_row(parent, fp)
+        for line in layer.movement_lines:
+            self._add_item_row(parent, line)
+        for note in layer.notes:
+            self._add_item_row(parent, note)
+
+    # -- Perspective --------------------------------------------------------
+    def _populate_perspective(self, parent: QTreeWidgetItem) -> None:
+        row = QTreeWidgetItem(parent)
+        self.tree.setItemWidget(row, 0, self._build_perspective_settings_widget())
+
+        layer = self.scene.perspective_layer
+        self._add_item_row(parent, layer.horizon)
+        for vp in layer.vps:
+            self._add_item_row(parent, vp)
+
+    def _build_perspective_settings_widget(self) -> QWidget:
+        widget = QWidget()
+        v = QVBoxLayout(widget)
+        v.setContentsMargins(0, 4, 0, 4)
+        v.setSpacing(6)
 
         mode_row = QHBoxLayout()
         self._mode_group = QButtonGroup(self)
         self._mode_buttons: dict[PerspectiveMode, QRadioButton] = {}
-        for label, mode in [("1-pt", PerspectiveMode.ONE_POINT), ("2-pt", PerspectiveMode.TWO_POINT), ("3-pt", PerspectiveMode.THREE_POINT)]:
+        for label, mode in [
+            ("1-pt", PerspectiveMode.ONE_POINT),
+            ("2-pt", PerspectiveMode.TWO_POINT),
+            ("3-pt", PerspectiveMode.THREE_POINT),
+        ]:
             radio = QRadioButton(label)
-            if mode == PerspectiveMode.ONE_POINT:
+            if mode == self.scene.perspective_layer.mode:
                 radio.setChecked(True)
             radio.toggled.connect(lambda checked, m=mode: checked and self._on_perspective_mode_chosen(m))
             self._mode_group.addButton(radio)
@@ -190,7 +310,8 @@ class LayersPanel(QWidget):
         spacing_row.addWidget(QLabel("Grid lines"))
         self.spacing_spin = QSpinBox()
         self.spacing_spin.setRange(2, 48)
-        self.spacing_spin.setValue(12)
+        self.spacing_spin.setValue(self.scene.perspective_layer.grid.line_count)
+        self._spacing_last = self.spacing_spin.value()
         self.spacing_spin.valueChanged.connect(self._on_spacing_changed)
         self.spacing_spin.editingFinished.connect(self._commit_spacing)
         spacing_row.addWidget(self.spacing_spin)
@@ -201,7 +322,7 @@ class LayersPanel(QWidget):
         self.line_width_spin = QDoubleSpinBox()
         self.line_width_spin.setRange(1.0, 8.0)
         self.line_width_spin.setSingleStep(0.5)
-        self.line_width_spin.setValue(2.0)
+        self.line_width_spin.setValue(self._line_width_last)
         self.line_width_spin.setToolTip(
             "Thicker lines are easier to see when projecting onto a wall — "
             "increase this if fine lines wash out until you zoom in."
@@ -215,37 +336,15 @@ class LayersPanel(QWidget):
         opacity_row.addWidget(QLabel("Opacity"))
         self.perspective_opacity = QSlider(Qt.Horizontal)
         self.perspective_opacity.setRange(10, 100)
-        self.perspective_opacity.setValue(85)
+        self.perspective_opacity.setValue(int(self.scene.perspective_layer.layer_opacity() * 100))
         self.perspective_opacity.valueChanged.connect(lambda v_: self.scene.perspective_layer.set_layer_opacity(v_ / 100))
         self.perspective_opacity.sliderPressed.connect(self._on_perspective_opacity_pressed)
         self.perspective_opacity.sliderReleased.connect(self._on_perspective_opacity_released)
         opacity_row.addWidget(self.perspective_opacity)
         v.addLayout(opacity_row)
 
-        self._layout.addWidget(box)
+        return widget
 
-    # -- undo/redo sync -----------------------------------------------------
-    def sync_from_scene(self) -> None:
-        """Refresh widgets that can drift out of sync after an undo/redo,
-        since undo commands mutate the scene directly rather than going
-        through these widgets' change handlers. Called whenever the undo
-        stack's index changes (see MainWindow._rebuild_workspace).
-        """
-        mode = self.scene.perspective_layer.mode
-        radio = self._mode_buttons.get(mode)
-        if radio is not None and not radio.isChecked():
-            radio.blockSignals(True)
-            radio.setChecked(True)
-            radio.blockSignals(False)
-
-        spacing = self.scene.perspective_layer.grid.line_count
-        if self.spacing_spin.value() != spacing:
-            self.spacing_spin.blockSignals(True)
-            self.spacing_spin.setValue(spacing)
-            self.spacing_spin.blockSignals(False)
-            self._spacing_last = spacing
-
-    # -- perspective: undo-aware wrappers ----------------------------------
     def _on_perspective_mode_chosen(self, mode: PerspectiveMode) -> None:
         layer = self.scene.perspective_layer
         if mode == layer.mode:
@@ -302,43 +401,73 @@ class LayersPanel(QWidget):
             )
 
     # -- Lighting -----------------------------------------------------
-    def _build_lighting_section(self) -> None:
-        box = QGroupBox("Lighting")
-        v = QVBoxLayout(box)
-        header = _LayerHeader("Light Plan")
-        header.visibility_toggled.connect(self.scene.lighting_layer.setVisible)
-        header.lock_toggled.connect(lambda on: self.scene.set_layer_locked(LayerKind.LIGHTING, on))
-        v.addWidget(header)
-
-        row1 = QHBoxLayout()
-        for label, tool in [("+ Light Source", "light_source"), ("+ Light Dir.", "light_arrow")]:
-            row1.addWidget(self._make_tool_button(label, tool))
-        v.addLayout(row1)
-
-        row2 = QHBoxLayout()
-        for label, tool in [("+ Shadow Dir.", "shadow_arrow"), ("+ Note", "note_light")]:
-            row2.addWidget(self._make_tool_button(label, tool))
-        v.addLayout(row2)
-
-        self._layout.addWidget(box)
+    def _populate_lighting(self, parent: QTreeWidgetItem) -> None:
+        self._add_tool_row(parent, [
+            ("light_source", "light", "Add light source"),
+            ("light_arrow", "light", "Add light direction — click a start point, then an end point"),
+            ("shadow_arrow", "shadow", "Add shadow direction — click a start point, then an end point"),
+            ("note_light", "note", "Add note"),
+        ])
+        layer = self.scene.lighting_layer
+        for source in layer.sources:
+            self._add_item_row(parent, source)
+        for arrow in layer.arrows:
+            self._add_item_row(parent, arrow)
+        for note in layer.notes:
+            self._add_item_row(parent, note)
 
     # -- Guides -----------------------------------------------------------
-    def _build_guides_section(self) -> None:
-        box = QGroupBox("Guides")
-        v = QVBoxLayout(box)
-        thirds = QCheckBox("Rule of Thirds")
-        thirds.toggled.connect(self.scene.guides_layer.set_rule_of_thirds)
-        golden = QCheckBox("Golden Ratio")
-        golden.toggled.connect(self.scene.guides_layer.set_golden_ratio)
-        v.addWidget(thirds)
-        v.addWidget(golden)
-        self._layout.addWidget(box)
+    def _populate_guides(self, parent: QTreeWidgetItem) -> None:
+        layer = self.scene.guides_layer
+        self._add_toggle_row(parent, "Rule of Thirds", layer.thirds.isVisible(), layer.set_rule_of_thirds)
+        self._add_toggle_row(parent, "Golden Ratio", layer.golden.isVisible(), layer.set_golden_ratio)
+
+    # -- selection sync (canvas <-> tree) ------------------------------------
+    def _on_tree_selection_changed(self) -> None:
+        if self._syncing_selection:
+            return
+        items = [
+            row.data(0, _ROLE_ITEM)
+            for row in self.tree.selectedItems()
+            if row.data(0, _ROLE_ITEM) is not None
+        ]
+        self.scene.set_selection(items)
+
+    def _sync_selection_highlight(self) -> None:
+        self._syncing_selection = True
+        try:
+            selected_ids = {id(obj) for obj in self.scene.selected_items()}
+            self.tree.clearSelection()
+            for oid, row in self._row_for_obj.items():
+                row.setSelected(oid in selected_ids)
+        finally:
+            self._syncing_selection = False
+
+    # -- search -----------------------------------------------------------
+    def _apply_search_filter(self) -> None:
+        text = self.search_edit.text().strip().lower()
+        for kind, layer_row in self._layer_rows.items():
+            any_match = not text and True
+            for i in range(layer_row.childCount()):
+                child = layer_row.child(i)
+                obj = child.data(0, _ROLE_ITEM)
+                if obj is None:
+                    child.setHidden(False)  # tool rows / settings / toggles always show
+                    any_match = any_match or not text
+                    continue
+                match = (not text) or (text in child.text(0).lower())
+                child.setHidden(not match)
+                any_match = any_match or match
+            layer_hides = bool(text) and not any_match and text not in C.LAYER_LABELS[kind].lower()
+            layer_row.setHidden(layer_hides)
 
     # -- tool activation (single-select across all tool buttons) ----------
-    def _make_tool_button(self, label: str, tool: str) -> QToolButton:
+    def _make_tool_button(self, tool: str, icon_name: str, tooltip: str) -> QToolButton:
         btn = QToolButton()
-        btn.setText(label)
+        btn.setIcon(icons.icon(icon_name))
         btn.setCheckable(True)
+        btn.setAutoRaise(True)
+        btn.setToolTip(tooltip)
         btn.clicked.connect(lambda _checked, t=tool: self._activate_tool(t))
         self._tool_buttons[tool] = btn
         return btn
@@ -355,3 +484,10 @@ class LayersPanel(QWidget):
             btn.blockSignals(True)
             btn.setChecked(tool == active_tool)
             btn.blockSignals(False)
+
+    # -- back-compat call points (MainWindow calls these by name) ----------
+    def refresh_reference_list(self) -> None:
+        self.refresh_structure()
+
+    def sync_from_scene(self) -> None:
+        self.refresh_structure()
