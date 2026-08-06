@@ -79,6 +79,36 @@ def _qimage_to_png_bytes(image: QImage) -> bytes:
     return bytes(buf.data())
 
 
+def render_thumbnail(scene: QGraphicsScene, source_rect: QRectF,
+                      px_per_inch: float = 100.0, max_dim: int = 240) -> QImage:
+    """A small preview render for the recent-files start screen — thumb.png
+    was always part of the .atelier schema (save_atelier's thumbnail
+    parameter) but nothing ever actually generated one.
+    """
+    w_in = source_rect.width() / px_per_inch
+    h_in = source_rect.height() / px_per_inch
+    longer_in = max(w_in, h_in, 0.01)
+    dpi = max_dim / longer_in
+    return render_scene_to_image(scene, source_rect, dpi=dpi, px_per_inch=px_per_inch)
+
+
+def read_thumbnail(path: str | Path) -> bytes | None:
+    """Just the cached thumb.png from a .atelier file, without decoding the
+    full manifest/images — so building a recent-files thumbnail grid
+    doesn't mean fully loading every project in it.
+    """
+    path = Path(path)
+    if not path.exists():
+        return None
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            if THUMB_NAME in zf.namelist():
+                return zf.read(THUMB_NAME)
+    except (zipfile.BadZipFile, OSError):
+        return None
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------

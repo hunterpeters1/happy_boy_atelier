@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QPointF, QSize, QStandardPaths, QTimer
+from PySide6.QtCore import Qt, QPointF, QSettings, QSize, QStandardPaths, QTimer
 from PySide6.QtGui import QAction, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -25,6 +25,8 @@ from .atelier_io import (
     export_pdf_planning_sheet,
     export_png,
     load_atelier,
+    read_thumbnail,
+    render_thumbnail,
     save_atelier,
 )
 from .canvas.canvas_scene import CanvasScene
@@ -33,10 +35,13 @@ from .canvas.undo_commands import AddItemCommand
 from .dialogs.command_palette import CommandPalette
 from .dialogs.export_dialog import ExportDialog
 from .dialogs.new_project_dialog import NewProjectDialog
+from .dialogs.start_screen import StartScreen
 from .panels.layers_panel import LayersPanel
 from .panels.properties_panel import PropertiesPanel
 from .project import CanvasSpec, ProjectMeta, empty_manifest
 from .projector.projector_window import ProjectorWindow
+
+MAX_RECENT_FILES = 10
 
 
 class MainWindow(QMainWindow):
@@ -79,10 +84,14 @@ class MainWindow(QMainWindow):
         """Called once at startup, before the default new-project workspace
         is built. If a recovery snapshot exists, that means the last
         session ended uncleanly (crash, force-quit, power loss) — offer to
-        recover it with a blocking choice before anything else loads.
+        recover it with a blocking choice before anything else loads. With
+        no recovery pending, a recent-files start screen replaces dropping
+        straight into a blank Untitled Painting — but only if there's
+        anything recent to show, so a fresh install still opens straight
+        to a blank canvas with zero extra clicks.
         """
         if not recovery.has_recovery_file():
-            self._new_project(CanvasSpec())
+            self._offer_start_screen()
             return
 
         box = QMessageBox(self)
@@ -127,10 +136,33 @@ class MainWindow(QMainWindow):
             self.lock_action.setChecked(self.meta.locked)
             self._update_lock_banner()
             self.statusBar().showMessage("Recovered your last unsaved session — Save to keep it.", 6000)
+            # Deliberately NOT deleting the recovery file here. It used to
+            # be removed the instant either button was clicked — meaning a
+            # second crash before the artist's first post-recovery Save
+            # lost the work again, with no safety net at all in between.
+            # save_project() already deletes it on a real save; that's now
+            # the only thing that does, for a recovered session.
         else:
+            recovery.delete_recovery_file()
             self._new_project(CanvasSpec())
 
-        recovery.delete_recovery_file()
+    def _offer_start_screen(self) -> None:
+        recents = self._recent_files()
+        if not recents:
+            self._new_project(CanvasSpec())
+            return
+        thumbs = [(path, read_thumbnail(path)) for path in recents]
+        dialog = StartScreen(thumbs, self)
+        dialog.open_recent.connect(self._open_path)
+        dialog.new_painting_requested.connect(self.new_project_dialog)
+        dialog.open_requested.connect(self.open_project)
+        dialog.exec()
+        # Any of the three signals above already builds a real workspace
+        # via _rebuild_workspace(); "Start Blank" (reject) or closing the
+        # dialog without picking anything leaves self.scene unset, so
+        # this is the one place that needs an explicit fallback.
+        if self.scene is None:
+            self._new_project(CanvasSpec())
 
     # -- workspace construction --------------------------------------------
     def _rebuild_workspace(self, scene: CanvasScene) -> None:
@@ -245,6 +277,8 @@ class MainWindow(QMainWindow):
         file_menu = menu.addMenu("&File")
         self.new_action = self._add_action(file_menu, "New Painting…", "Ctrl+N", self.new_project_dialog, icon_name="new")
         self.open_action = self._add_action(file_menu, "Open…", "Ctrl+O", self.open_project, icon_name="open")
+        self.recent_menu = file_menu.addMenu("Open Recent")
+        self.recent_menu.aboutToShow.connect(self._populate_recent_menu)
         self.save_action = self._add_action(file_menu, "Save", "Ctrl+S", self.save_project, icon_name="save")
         self._add_action(file_menu, "Save As…", "Ctrl+Shift+S", lambda: self.save_project(force_dialog=True))
         file_menu.addSeparator()
@@ -379,6 +413,38 @@ class MainWindow(QMainWindow):
         dialog = CommandPalette(self._collect_actions(), self)
         dialog.exec()
 
+    # -- recent files ---------------------------------------------------
+    def _recent_files(self) -> list[Path]:
+        raw = QSettings().value("recentFiles", [])
+        if isinstance(raw, str):
+            raw = [raw]
+        # Silently drop entries for files that have since been moved,
+        # renamed, or deleted rather than showing a dead link.
+        return [p for p in (Path(s) for s in raw if s) if p.exists()]
+
+    def _note_recent_file(self, path: Path) -> None:
+        existing = [str(p) for p in self._recent_files() if p != path]
+        updated = [str(path)] + existing
+        QSettings().setValue("recentFiles", updated[:MAX_RECENT_FILES])
+
+    def _clear_recent_files(self) -> None:
+        QSettings().remove("recentFiles")
+
+    def _populate_recent_menu(self) -> None:
+        self.recent_menu.clear()
+        recents = self._recent_files()
+        if not recents:
+            empty_action = self.recent_menu.addAction("No Recent Paintings")
+            empty_action.setEnabled(False)
+            return
+        for path in recents:
+            action = self.recent_menu.addAction(path.stem)
+            action.setToolTip(str(path))
+            action.triggered.connect(lambda _checked, p=path: self._open_path(p))
+        self.recent_menu.addSeparator()
+        clear_action = self.recent_menu.addAction("Clear Recent")
+        clear_action.triggered.connect(self._clear_recent_files)
+
     # -- project lifecycle --------------------------------------------------
     def _new_project(self, spec: CanvasSpec) -> None:
         self.current_path = None
@@ -459,9 +525,10 @@ class MainWindow(QMainWindow):
             path = Path(filename)
 
         manifest, images = self._build_manifest()
+        thumbnail = render_thumbnail(self.scene, self.scene.canvas_rect())
 
         try:
-            save_atelier(path, manifest, images)
+            save_atelier(path, manifest, images, thumbnail=thumbnail)
         except OSError as exc:
             QMessageBox.critical(self, "Save Failed", str(exc))
             return
@@ -473,6 +540,7 @@ class MainWindow(QMainWindow):
         # never asked for.
         recovery.delete_recovery_file()
         self._update_window_title()
+        self._note_recent_file(path)
         self.statusBar().showMessage(f"Saved to {path.name}", 4000)
 
     def _autosave_tick(self) -> None:
@@ -494,8 +562,12 @@ class MainWindow(QMainWindow):
         filename, _ = QFileDialog.getOpenFileName(self, "Open Painting", "", "Happy Boy Atelier (*.atelier)")
         if not filename:
             return
+        self._open_path(Path(filename))
+
+    def _open_path(self, path: Path) -> None:
+        """Shared by the Open dialog, Open Recent, and the start screen."""
         try:
-            manifest, images = load_atelier(filename)
+            manifest, images = load_atelier(path)
         except AtelierIOError as exc:
             QMessageBox.critical(self, "Open Failed", str(exc))
             return
@@ -508,11 +580,12 @@ class MainWindow(QMainWindow):
         scene.load_manifest_layers(manifest, images)
         scene.set_global_locked(self.meta.locked)
 
-        self.current_path = Path(filename)
+        self.current_path = path
         self._rebuild_workspace(scene)
         self.layers_panel.refresh_reference_list()
         self.lock_action.setChecked(self.meta.locked)
         self._update_lock_banner()
+        self._note_recent_file(path)
 
     def export_project(self) -> None:
         if self.scene is None:
