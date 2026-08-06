@@ -81,7 +81,7 @@ def test_tool_click_add_and_delete_selected_round_trip(qapp):
     assert len(scene.composition_layer.focal_points) == 1
     item = scene.composition_layer.focal_points[0]
 
-    item.setSelected(True)
+    scene.set_selection([item])
     scene.delete_selected_items()
     assert scene.composition_layer.focal_points == []
 
@@ -589,8 +589,7 @@ def test_multi_select_delete_is_one_undo_step(qapp):
     scene = _scene(qapp)
     a = scene.composition_layer.add_focal_point("primary", QPointF(0, 0))
     b = scene.composition_layer.add_focal_point("secondary", QPointF(20, 20))
-    a.setSelected(True)
-    b.setSelected(True)
+    scene.set_selection([a, b])
     start_index = scene.undo_stack.index()
 
     scene.delete_selected_items()

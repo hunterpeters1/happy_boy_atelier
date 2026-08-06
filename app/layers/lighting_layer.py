@@ -40,7 +40,7 @@ class LightSourceItem(InteractiveItem):
             x1, y1 = math.cos(angle) * SOURCE_R * 0.75, math.sin(angle) * SOURCE_R * 0.75
             x2, y2 = math.cos(angle) * SOURCE_R * 1.3, math.sin(angle) * SOURCE_R * 1.3
             painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
-        if self.isSelected():
+        if self.is_app_selected():
             painter.setPen(QPen(QColor(C.COLOR_BRASS_BRIGHT), 1, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(QPointF(0, 0), SOURCE_R + 6, SOURCE_R + 6)
@@ -147,7 +147,7 @@ class DirectionArrowItem(InteractiveItem):
         painter.setBrush(QBrush(color))
         painter.setPen(Qt.NoPen)
         painter.drawPolygon(QPolygonF([tip, left, right]))
-        if self.isSelected():
+        if self.is_app_selected():
             painter.setPen(QPen(QColor(C.COLOR_BRASS), 1, Qt.DotLine))
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(self.boundingRect())

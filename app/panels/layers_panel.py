@@ -132,11 +132,9 @@ class LayersPanel(QWidget):
 
     def _on_ref_list_selection(self) -> None:
         selected = self.ref_list.selectedItems()
-        self.scene.clearSelection()
-        for entry in selected:
-            item = entry.data(Qt.UserRole)
-            if item is not None:
-                item.setSelected(True)
+        items = [entry.data(Qt.UserRole) for entry in selected]
+        items = [item for item in items if item is not None]
+        self.scene.set_selection(items)
 
     # -- Composition ----------------------------------------------------
     def _build_composition_section(self) -> None:

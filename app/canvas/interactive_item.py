@@ -43,6 +43,14 @@ class InteractiveItem(QGraphicsObject):
         super().__init__(parent)
         self._locked = False
         self._transform_snapshot = None
+        # NOT Qt's own isSelected()/setSelected() — confirmed at runtime
+        # (a real QTest.mouseClick simulation, not just informal
+        # suspicion) that selection state does not stick for children of a
+        # QGraphicsItemGroup with setHandlesChildEvents(False), which is
+        # every layer in this app. This flag, driven exclusively by
+        # CanvasScene's own selection tracking (canvas_scene.py), is the
+        # one thing paint() and every other consumer should check instead.
+        self._app_selected = False
         self.setFlags(
             QGraphicsItem.ItemIsMovable
             | QGraphicsItem.ItemIsSelectable
@@ -57,9 +65,21 @@ class InteractiveItem(QGraphicsObject):
         self._locked = locked
         self.setFlag(QGraphicsItem.ItemIsMovable, not locked)
         self.setFlag(QGraphicsItem.ItemIsSelectable, not locked)
-        if locked and self.isSelected():
-            self.setSelected(False)
+        if locked and self._app_selected:
+            scene = self.scene()
+            if scene is not None and hasattr(scene, "remove_from_selection"):
+                scene.remove_from_selection(self)
         self._on_locked_changed(locked)
+        self.update()
+
+    # -- selection ----------------------------------------------------------
+    def is_app_selected(self) -> bool:
+        return self._app_selected
+
+    def set_app_selected(self, selected: bool) -> None:
+        if self._app_selected == selected:
+            return
+        self._app_selected = selected
         self.update()
 
     def _on_locked_changed(self, locked: bool) -> None:

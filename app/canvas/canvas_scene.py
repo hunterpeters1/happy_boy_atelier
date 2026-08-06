@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QGraphicsScene
 from .. import constants as C
 from ..constants import LayerKind
 from ..project import CanvasSpec
+from .interactive_item import InteractiveItem
 from ..layers.reference_layer import ReferenceLayerGroup
 from ..layers.composition_layer import CompositionLayerGroup, FocalPointItem, MovementLineItem, NoteItem
 from ..layers.perspective_layer import PerspectiveLayerGroup
@@ -27,9 +28,12 @@ _TWO_CLICK_TOOLS = {"movement_line", "light_arrow", "shadow_arrow"}
 
 class CanvasScene(QGraphicsScene):
     tool_finished = Signal()
-    # Emitted directly by an item's own click handler (see canvas/selection.py)
-    # so the Properties panel can be driven without depending on Qt's
-    # internal selectedItems()/isSelected() bookkeeping alone.
+    # Emitted whenever the app's own selection list (see selected_items()
+    # below) changes — the one thing the Properties panel should listen to.
+    selection_changed = Signal()
+    # Emitted for whichever single item was most recently selected/clicked,
+    # driving the resize/rotate handle frame's notion of "primary" item.
+    # A multi-select still has exactly one of these (the last one clicked).
     item_activated = Signal(object)
 
     def __init__(self, canvas_spec: CanvasSpec):
@@ -62,6 +66,10 @@ class CanvasScene(QGraphicsScene):
         self._global_locked = False
         self._layer_locked_flags = {kind: False for kind in C.LAYER_ORDER}
 
+        # The app's own selection list — see selected_items() below for why
+        # this exists instead of using QGraphicsScene's built-in one.
+        self._selected_items: list = []
+
         # Drives the resize/rotate handles + highlight border on reference
         # images (see ReferenceImageItem.set_ui_active in reference_layer.py).
         # Deliberately independent of Qt's own isSelected(): confirmed at
@@ -90,6 +98,54 @@ class CanvasScene(QGraphicsScene):
                 prev.set_ui_active(False)
             except RuntimeError:
                 pass  # underlying C++ item was already deleted
+
+    # -- selection ----------------------------------------------------------
+    # The app's own selection tracking. QGraphicsScene.selectedItems() and
+    # QGraphicsItem.isSelected()/setSelected() are NOT used anywhere in this
+    # app for interactive items — confirmed at runtime, with a real
+    # QTest.mouseClick simulation (not just informal suspicion), that
+    # selection state does not stick for children of a QGraphicsItemGroup
+    # with setHandlesChildEvents(False), which every layer here is. Every
+    # consumer (Properties panel, Delete, the selected-item paint highlight)
+    # must go through this list instead, or it silently sees nothing.
+    def selected_items(self) -> list:
+        return list(self._selected_items)
+
+    def set_selection(self, items: list) -> None:
+        """Replace the selection outright — a plain click, Escape, locking,
+        or deleting. Always notifies, even if the new set is unchanged,
+        matching a plain click's idempotent behavior.
+        """
+        items = list(items)
+        for old in self._selected_items:
+            if old not in items:
+                self._set_item_app_selected(old, False)
+        for new in items:
+            self._set_item_app_selected(new, True)
+        self._selected_items = items
+        self.selection_changed.emit()
+        if items:
+            self.item_activated.emit(items[-1])
+
+    def add_to_selection(self, item) -> None:
+        """Extend the selection — a Shift-click."""
+        if item not in self._selected_items:
+            self._selected_items.append(item)
+            self._set_item_app_selected(item, True)
+            self.selection_changed.emit()
+        self.item_activated.emit(item)
+
+    def remove_from_selection(self, item) -> None:
+        if item not in self._selected_items:
+            return
+        self._selected_items.remove(item)
+        self._set_item_app_selected(item, False)
+        self.selection_changed.emit()
+
+    @staticmethod
+    def _set_item_app_selected(item, selected: bool) -> None:
+        if hasattr(item, "set_app_selected"):
+            item.set_app_selected(selected)
 
     # -- geometry -----------------------------------------------------
     def canvas_rect(self) -> QRectF:
@@ -130,7 +186,7 @@ class CanvasScene(QGraphicsScene):
             self._apply_layer_lock(kind, True if locked else self._layer_locked_flags.get(kind, False))
         if locked:
             self.set_active_tool(None)
-            self.clearSelection()
+            self.set_selection([])
             self._deactivate_ui_item()
 
     def is_globally_locked(self) -> bool:
@@ -171,19 +227,44 @@ class CanvasScene(QGraphicsScene):
 
     def _maybe_deactivate_on_empty_click(self, pos) -> None:
         """A click that doesn't land on any selectable item (empty canvas,
-        or the start of a rubber-band drag) should drop the current
-        resize/rotate handle target, same as clicking elsewhere always
-        has. See _on_item_activated for why this isn't just isSelected().
+        or the start of a rubber-band drag) clears the current selection
+        and drops the resize/rotate handle target — previously this only
+        cleared the handle target; the Properties panel had no path back
+        to "Nothing selected" from a background click at all.
+
+        "Landed on a selectable item" is checked via InteractiveItem, the
+        shared base every marker type inherits — not set_ui_active, which
+        only ReferenceImageItem implements. Walking up looking for
+        set_ui_active specifically used to misidentify a click on any
+        non-reference-image item (a focal point, a note, ...) as an empty
+        click; harmless before (nothing consumed the result but the
+        reference-image-only handle frame), but load-bearing now that a
+        real selection list hangs off the same check.
+
+        Uses items(pos), not itemAt(pos) — itemAt() reports only the
+        single topmost item by z-order/shape and ignores
+        acceptedMouseButtons entirely, so it always finds the Guides
+        overlay (top z-order, covers the whole canvas, non-interactive by
+        design) sitting over whatever was actually clicked. items() scans
+        the full stack at that point so a non-interactive layer on top
+        doesn't hide an interactive marker underneath it.
         """
-        if self._active_ui_item is None:
-            return
         views = self.views()
         transform = views[0].transform() if views else QTransform()
-        node = self.itemAt(pos, transform)
-        while node is not None and not hasattr(node, "set_ui_active"):
-            node = node.parentItem()
-        if node is None:
+        hit_interactive = False
+        for candidate in self.items(pos, Qt.IntersectsItemShape, Qt.DescendingOrder, transform):
+            node = candidate
+            while node is not None and not isinstance(node, InteractiveItem):
+                node = node.parentItem()
+            if node is not None:
+                hit_interactive = True
+                break
+        if hit_interactive:
+            return
+        if self._active_ui_item is not None:
             self._deactivate_ui_item()
+        if self._selected_items:
+            self.set_selection([])
 
     def keyPressEvent(self, event) -> None:
         # Escape always backs out exactly one level: cancel an armed
@@ -201,8 +282,8 @@ class CanvasScene(QGraphicsScene):
                 item.cancel_crop()
                 event.accept()
                 return
-            if self.selectedItems():
-                self.clearSelection()
+            if self._selected_items:
+                self.set_selection([])
                 self._deactivate_ui_item()
                 event.accept()
                 return
@@ -273,9 +354,13 @@ class CanvasScene(QGraphicsScene):
         # and are not individually deletable.
 
     def delete_selected_items(self) -> None:
-        items = list(self.selectedItems())
+        items = self.selected_items()
         if not items:
             return
+        # Clear tracking before the underlying Qt items are destroyed —
+        # otherwise _selected_items holds dangling references.
+        self.set_selection([])
+        self._deactivate_ui_item()
         # Group a multi-select delete into one undo step rather than one
         # per item, so Ctrl+Z undoes "delete these 3 things" in one press.
         multi = len(items) > 1

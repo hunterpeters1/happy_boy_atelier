@@ -176,8 +176,17 @@ class MainWindow(QMainWindow):
         self.properties_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
         self.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
 
-        scene.selectionChanged.connect(self.properties_panel.refresh)
-        scene.item_activated.connect(self.properties_panel.show_item)
+        # The Inspector has exactly one source of truth: CanvasScene's own
+        # selection_changed signal (see canvas_scene.py — Qt's native
+        # selectionChanged/selectedItems() don't work for these items at
+        # all, not just unreliably). Previously the Inspector was *also*
+        # wired to item_activated via a show_item() method that forced
+        # single-item display even when several items were Shift-selected
+        # — that's what let the Inspector and the actual selection
+        # disagree with each other on screen. item_activated now drives
+        # only the resize/rotate handle frame (_on_item_activated, in
+        # canvas_scene.py), a separate concern.
+        scene.selection_changed.connect(self.properties_panel.refresh)
 
         self._update_window_title()
         self._update_status_hint()

@@ -158,16 +158,9 @@ class PropertiesPanel(QWidget):
 
     # -----------------------------------------------------------------
     def refresh(self) -> None:
-        selected = self.scene.selectedItems()
+        selected = self.scene.selected_items()
         item = selected[0] if len(selected) == 1 else None
         self._apply(item, multiple=len(selected) > 1)
-
-    def show_item(self, item) -> None:
-        """Point the inspector at `item` directly — used by the canvas's
-        click handlers as a direct hand-off, independent of whatever Qt's
-        selectedItems()/isSelected() bookkeeping reports at the moment.
-        """
-        self._apply(item, multiple=False)
 
     def _apply(self, item, multiple: bool) -> None:
         self._current = item

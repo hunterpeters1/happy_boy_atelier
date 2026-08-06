@@ -46,7 +46,7 @@ class FocalPointItem(InteractiveItem):
         painter.drawLine(r - 3, 0, r + 5, 0)
         painter.drawLine(0, -r - 5, 0, -r + 3)
         painter.drawLine(0, r - 3, 0, r + 5)
-        if self.isSelected():
+        if self.is_app_selected():
             painter.setPen(QPen(QColor(C.COLOR_BRASS_BRIGHT), 1, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(QPointF(0, 0), r + 6, r + 6)
@@ -98,7 +98,7 @@ class MovementLineItem(InteractiveItem):
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.NoPen)
             painter.drawPolygon(QPolygonF([end, p1, p2]))
-        if self.isSelected():
+        if self.is_app_selected():
             painter.setPen(QPen(QColor(C.COLOR_BRASS), 1, Qt.DotLine))
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(self.boundingRect())
@@ -179,7 +179,7 @@ class NoteItem(InteractiveItem):
         painter.setPen(QPen(QColor(C.COLOR_BG_DARKEST)))
         painter.setFont(QFont(C.FONT_FAMILY_UI, 8, QFont.Bold))
         painter.drawText(QRectF(-7, -7, 14, 14), Qt.AlignCenter, "i")
-        if self.isSelected():
+        if self.is_app_selected():
             painter.setPen(QPen(QColor(C.COLOR_BRASS_BRIGHT), 1, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(QRectF(-11, -11, 22, 22))
