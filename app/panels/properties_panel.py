@@ -5,7 +5,7 @@ than a maze of per-type stacked pages.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import constants as C
 from ..canvas.undo_commands import SetNoteTextCommand, SetPropertyCommand
 from ..layers.reference_layer import ReferenceImageItem
 from ..layers.composition_layer import FocalPointItem, MovementLineItem, NoteItem
@@ -62,6 +63,8 @@ class PropertiesPanel(QWidget):
         self._note_baseline = None
         self._note_last = None
         self._note_edit_item = None
+        self._position_baseline: QPointF | None = None
+        self._position_edit_item = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -141,13 +144,88 @@ class PropertiesPanel(QWidget):
         nlayout.addWidget(self.note_edit)
         layout.addWidget(self.note_box)
 
-        # -- position readout (VP / horizon / light source) ---------------
+        # -- position (VP / horizon) -----------------------------------
+        # Editable fields, not a read-only label — previously the only way
+        # to reposition a vanishing point or the horizon was a canvas
+        # drag; there was no way to type an exact coordinate at all.
         self.position_box = QGroupBox("Position")
         players = QVBoxLayout(self.position_box)
-        self.position_label = QLabel("")
-        self.position_label.setProperty("role", "hint")
-        players.addWidget(self.position_label)
+
+        self._position_x_widget = QWidget()
+        x_row = QHBoxLayout(self._position_x_widget)
+        x_row.setContentsMargins(0, 0, 0, 0)
+        x_row.addWidget(QLabel("X"))
+        self.position_x_spin = QDoubleSpinBox()
+        self.position_x_spin.setRange(-50000, 50000)
+        self.position_x_spin.setDecimals(2)
+        self.position_x_spin.valueChanged.connect(self._on_position_changed)
+        self.position_x_spin.editingFinished.connect(self._commit_position)
+        x_row.addWidget(self.position_x_spin)
+        players.addWidget(self._position_x_widget)
+
+        y_row = QHBoxLayout()
+        y_row.addWidget(QLabel("Y"))
+        self.position_y_spin = QDoubleSpinBox()
+        self.position_y_spin.setRange(-50000, 50000)
+        self.position_y_spin.setDecimals(2)
+        self.position_y_spin.valueChanged.connect(self._on_position_changed)
+        self.position_y_spin.editingFinished.connect(self._commit_position)
+        y_row.addWidget(self.position_y_spin)
+        players.addLayout(y_row)
+
         layout.addWidget(self.position_box)
+
+        # -- batch edit (multi-selection) --------------------------------
+        # Previously selecting more than one item hid every control and
+        # showed only "Multiple items selected" — no way to touch several
+        # items at once without editing them one at a time.
+        self.batch_box = QGroupBox("Batch Edit")
+        blayout = QVBoxLayout(self.batch_box)
+
+        op_row = QHBoxLayout()
+        op_row.addWidget(QLabel("Opacity"))
+        op_minus = QPushButton("−5%")
+        op_minus.clicked.connect(lambda: self._batch_nudge_opacity(-0.05))
+        op_plus = QPushButton("+5%")
+        op_plus.clicked.connect(lambda: self._batch_nudge_opacity(0.05))
+        op_row.addWidget(op_minus)
+        op_row.addWidget(op_plus)
+        blayout.addLayout(op_row)
+
+        self._batch_scale_widget = QWidget()
+        scale_row = QHBoxLayout(self._batch_scale_widget)
+        scale_row.setContentsMargins(0, 0, 0, 0)
+        scale_row.addWidget(QLabel("Scale"))
+        scale_down = QPushButton("×0.95")
+        scale_down.clicked.connect(lambda: self._batch_nudge_scale(0.95))
+        scale_up = QPushButton("×1.05")
+        scale_up.clicked.connect(lambda: self._batch_nudge_scale(1.05))
+        scale_row.addWidget(scale_down)
+        scale_row.addWidget(scale_up)
+        blayout.addWidget(self._batch_scale_widget)
+
+        self._batch_align_widget = QWidget()
+        align_row = QHBoxLayout(self._batch_align_widget)
+        align_row.setContentsMargins(0, 0, 0, 0)
+        align_row.addWidget(QLabel("Align"))
+        for label, mode, tip in [
+            ("⟸", "left", "Align left edges"),
+            ("⟹", "right", "Align right edges"),
+            ("⟰", "top", "Align top edges"),
+            ("⟱", "bottom", "Align bottom edges"),
+        ]:
+            btn = QPushButton(label)
+            btn.setToolTip(tip)
+            btn.setFixedWidth(28)
+            btn.clicked.connect(lambda _checked, m=mode: self._batch_align(m))
+            align_row.addWidget(btn)
+        blayout.addWidget(self._batch_align_widget)
+
+        batch_delete = QPushButton("Delete Selected")
+        batch_delete.clicked.connect(lambda: self.request_delete.emit())
+        blayout.addWidget(batch_delete)
+
+        layout.addWidget(self.batch_box)
 
         self.delete_btn = QPushButton("Delete Item")
         self.delete_btn.clicked.connect(lambda: self.request_delete.emit())
@@ -155,6 +233,16 @@ class PropertiesPanel(QWidget):
 
         layout.addStretch(1)
         self.refresh()
+
+    # -- unit conversion: scene coordinates are always 1/100 inch; shown
+    # in whichever unit the current canvas spec uses (in/cm/mm/px) --------
+    def _scene_to_display(self, value: float) -> float:
+        inches = value / C.SCENE_PX_PER_INCH
+        return C.from_inches(inches, self.scene.canvas_spec.unit)
+
+    def _display_to_scene(self, value: float) -> float:
+        inches = C.to_inches(value, self.scene.canvas_spec.unit)
+        return inches * C.SCENE_PX_PER_INCH
 
     # -----------------------------------------------------------------
     def refresh(self) -> None:
@@ -165,15 +253,23 @@ class PropertiesPanel(QWidget):
     def _apply(self, item, multiple: bool) -> None:
         self._current = item
 
-        for w in (self.transform_box, self.note_box, self.position_box, self.delete_btn):
+        for w in (self.transform_box, self.note_box, self.position_box, self.delete_btn, self.batch_box):
             w.setVisible(False)
         self.crop_apply_btn.setVisible(False)
         self.crop_cancel_btn.setVisible(False)
         self.crop_btn.setVisible(False)
 
         if item is None:
-            self.title.setText("Multiple items selected" if multiple else "Nothing selected")
-            self.hint.setVisible(True)
+            if multiple:
+                items = self.scene.selected_items()
+                self.title.setText(f"{len(items)} items selected")
+                self.hint.setVisible(False)
+                self.batch_box.setVisible(True)
+                self._batch_scale_widget.setVisible(any(hasattr(i, "set_scale_factor") for i in items))
+                self._batch_align_widget.setVisible(len(items) >= 2)
+            else:
+                self.title.setText("Nothing selected")
+                self.hint.setVisible(True)
             return
 
         self.hint.setVisible(False)
@@ -230,12 +326,18 @@ class PropertiesPanel(QWidget):
             elif isinstance(item, VanishingPointItem):
                 self.title.setText(f"Vanishing Point ({item.label})")
                 self.position_box.setVisible(True)
-                self.position_label.setText(f"x={item.pos().x():.0f}  y={item.pos().y():.0f}")
+                self._position_x_widget.setVisible(True)
+                self.position_x_spin.setValue(self._scene_to_display(item.pos().x()))
+                self.position_y_spin.setValue(self._scene_to_display(item.pos().y()))
 
             elif isinstance(item, HorizonLineItem):
                 self.title.setText("Horizon Line")
                 self.position_box.setVisible(True)
-                self.position_label.setText(f"y={item.pos().y():.0f}")
+                # X is fixed at 0 (HorizonLineItem.itemChange clamps every
+                # drag to vertical-only) — showing an editable field that
+                # always snaps back would be its own silent-no-op trap.
+                self._position_x_widget.setVisible(False)
+                self.position_y_spin.setValue(self._scene_to_display(item.pos().y()))
             else:
                 self.title.setText(type(item).__name__)
         finally:
@@ -285,6 +387,92 @@ class PropertiesPanel(QWidget):
         self._rotation_edit_item = None
         if item is not None and old != new:
             self._push_property(item.setRotation, old, new, "Change rotation")
+
+    def _on_position_changed(self, _value: float) -> None:
+        if self._updating or self._current is None or not hasattr(self._current, "setPos"):
+            return
+        if self._position_baseline is None:
+            self._position_baseline = self._current.pos()
+            self._position_edit_item = self._current
+        x = (
+            self._display_to_scene(self.position_x_spin.value())
+            if self._position_x_widget.isVisible()
+            else self._current.pos().x()
+        )
+        y = self._display_to_scene(self.position_y_spin.value())
+        self._current.setPos(x, y)
+
+    def _commit_position(self) -> None:
+        if self._position_baseline is None:
+            return
+        old, item = self._position_baseline, self._position_edit_item
+        self._position_baseline = None
+        self._position_edit_item = None
+        if item is not None:
+            new = item.pos()
+            if old != new:
+                self._push_property(item.setPos, old, new, "Move point")
+
+    # -- batch edit (multi-selection) --------------------------------------
+    def _batch_nudge_opacity(self, delta: float) -> None:
+        items = self.scene.selected_items()
+        if not items:
+            return
+        stack = self.scene.undo_stack
+        multi = len(items) > 1
+        if multi:
+            stack.beginMacro("Nudge opacity")
+        try:
+            for item in items:
+                old = item.opacity()
+                new = max(0.05, min(1.0, old + delta))
+                if new != old:
+                    stack.push(SetPropertyCommand(item.setOpacity, old, new, "Change opacity"))
+        finally:
+            if multi:
+                stack.endMacro()
+
+    def _batch_nudge_scale(self, factor: float) -> None:
+        items = [i for i in self.scene.selected_items() if hasattr(i, "set_scale_factor")]
+        if not items:
+            return
+        stack = self.scene.undo_stack
+        multi = len(items) > 1
+        if multi:
+            stack.beginMacro("Scale selection")
+        try:
+            for item in items:
+                old = item.scale_factor()
+                new = max(0.05, min(40.0, old * factor))
+                if new != old:
+                    stack.push(SetPropertyCommand(item.set_scale_factor, old, new, "Change scale"))
+        finally:
+            if multi:
+                stack.endMacro()
+
+    def _batch_align(self, mode: str) -> None:
+        items = self.scene.selected_items()
+        if len(items) < 2:
+            return
+        xs = [i.pos().x() for i in items]
+        ys = [i.pos().y() for i in items]
+        stack = self.scene.undo_stack
+        stack.beginMacro(f"Align {mode}")
+        try:
+            for item in items:
+                old = item.pos()
+                if mode == "left":
+                    new = QPointF(min(xs), old.y())
+                elif mode == "right":
+                    new = QPointF(max(xs), old.y())
+                elif mode == "top":
+                    new = QPointF(old.x(), min(ys))
+                else:
+                    new = QPointF(old.x(), max(ys))
+                if new != old:
+                    stack.push(SetPropertyCommand(item.setPos, old, new, f"Align {mode}"))
+        finally:
+            stack.endMacro()
 
     def _on_opacity_changed(self, value: int) -> None:
         if not self._updating and self._current is not None:

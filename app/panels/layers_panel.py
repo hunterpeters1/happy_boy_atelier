@@ -166,18 +166,36 @@ class LayersPanel(QWidget):
         for kind, row in self._layer_rows.items():
             self._expanded_default[kind] = row.isExpanded()
 
-        self.tree.clear()
-        self._row_for_obj = {}
-        self._layer_rows = {}
-        self._tool_buttons = {}
+        # tree.clear() destroys every existing row, which — since some of
+        # them are currently selected — fires itemSelectionChanged just
+        # like a real deselection would. Without this guard that ran
+        # unguarded straight into _on_tree_selection_changed(), which
+        # forwarded the now-empty tree selection to
+        # scene.set_selection([]), silently wiping the actual scene
+        # selection out from under any code that pushed an undo command
+        # (triggering this exact rebuild) and then expected the selection
+        # to still be there afterward — e.g. a batch edit followed
+        # immediately by another one.
+        self._syncing_selection = True
+        try:
+            self.tree.clear()
+            self._row_for_obj = {}
+            self._layer_rows = {}
+            self._tool_buttons = {}
 
-        self._build_layer(LayerKind.REFERENCE, "image", self.scene.reference_layer, self._populate_reference)
-        self._build_layer(LayerKind.COMPOSITION, "shapes", self.scene.composition_layer, self._populate_composition)
-        self._build_layer(LayerKind.PERSPECTIVE, "vanishing", self.scene.perspective_layer, self._populate_perspective)
-        self._build_layer(LayerKind.LIGHTING, "light", self.scene.lighting_layer, self._populate_lighting)
-        self._build_layer(
-            LayerKind.GUIDES, "shapes", self.scene.guides_layer, self._populate_guides, show_lock=False
-        )
+            self._build_layer(LayerKind.REFERENCE, "image", self.scene.reference_layer, self._populate_reference)
+            self._build_layer(
+                LayerKind.COMPOSITION, "shapes", self.scene.composition_layer, self._populate_composition
+            )
+            self._build_layer(
+                LayerKind.PERSPECTIVE, "vanishing", self.scene.perspective_layer, self._populate_perspective
+            )
+            self._build_layer(LayerKind.LIGHTING, "light", self.scene.lighting_layer, self._populate_lighting)
+            self._build_layer(
+                LayerKind.GUIDES, "shapes", self.scene.guides_layer, self._populate_guides, show_lock=False
+            )
+        finally:
+            self._syncing_selection = False
 
         self._sync_selection_highlight()
         self._apply_search_filter()
