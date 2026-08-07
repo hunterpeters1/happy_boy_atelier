@@ -108,9 +108,11 @@ Each imported photo is its own object:
   default; hold **Shift** to lock aspect ratio.
 - **Rotate** via the handle above the image; hold **Shift** to snap to
   15° increments.
-- **Crop** — Properties panel "Crop…" button, or right-click → Crop…
-  (disabled on locked images). Shows a draggable crop rectangle with its
-  own Apply/Cancel controls; Esc also cancels.
+- **Crop** — direct manipulation: select the image and drag any of the
+  four edge handles (left/right/top/bottom midpoints) inward, same
+  commit-on-release behavior as move/resize/rotate. No separate crop
+  mode to enter or exit. Properties panel has a "Reset Crop" button to
+  clear back to the full source image (disabled on locked images).
 - **Study Blur** — Properties panel has **Blur** and **Line Clarity**
   sliders (0–100) per image. This is a "squint test": blurs the image
   while boosting contrast on dark edges/lines, so you can judge overall
@@ -201,9 +203,10 @@ needed.
   nudges (±5%), scale nudges (×0.95/×1.05, only shown if every selected
   item supports scaling), and **align left/right/top/bottom** buttons
   that line up all selected items to the group's min/max edge.
-- **Right-click** an item for Delete / Lock / Unlock, and Crop… (reference
-  images only); right-click empty canvas for Fit Canvas, plus Cancel Tool
-  if one's armed.
+- **Right-click** an item for Delete / Lock / Unlock; right-click empty
+  canvas for Fit Canvas, plus Cancel Tool if one's armed. Cropping a
+  reference image is done via its on-canvas edge handles, not the
+  context menu — see Reference images above.
 - **Ctrl+K** — command palette. It's built by walking the entire live
   menu bar, so *every* menu action is searchable there, including ones
   that are easy to forget exist (Show Rulers, Appearance themes, etc.).

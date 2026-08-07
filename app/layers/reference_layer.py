@@ -527,16 +527,18 @@ class ReferenceImageItem(InteractiveItem):
         self.prepareGeometryChange()
         self._ui_active = active
         self._handles.set_active(active and not self._locked)
-        # Crop edge handles are visible only when this image has an active
-        # crop (i.e. crop != full source). They appear alongside the
-        # resize/rotate handles — no separate crop mode to enter/exit.
-        self._handles.set_crop_handles_visible(active and not self._locked and not self._crop_is_full())
+        # Crop edge handles appear alongside the resize/rotate handles any
+        # time the image is selected and unlocked — not gated on an
+        # existing crop, since dragging an edge inward from the full-image
+        # bounds is how a first crop gets created (see _crop_is_full()'s
+        # docstring for why it must NOT gate this).
+        self._handles.set_crop_handles_visible(active and not self._locked)
         self.update()
 
     def _on_locked_changed(self, locked: bool) -> None:
         self.prepareGeometryChange()
         self._handles.set_active(self._ui_active and not locked)
-        self._handles.set_crop_handles_visible(self._ui_active and not locked and not self._crop_is_full())
+        self._handles.set_crop_handles_visible(self._ui_active and not locked)
         self.setCursor(Qt.ArrowCursor if locked else Qt.OpenHandCursor)
 
     # -- crop -----------------------------------------------------------
@@ -548,7 +550,15 @@ class ReferenceImageItem(InteractiveItem):
     # captures one CropItemCommand per drag (committed on release), via
     # the same begin_transform()/commit_transform() pattern as move/resize.
     def _crop_is_full(self) -> bool:
-        """True if _crop covers the entire source pixmap (no crop applied)."""
+        """True if _crop covers the entire source pixmap (no crop applied).
+
+        Used by reset_crop() to no-op when there's nothing to reset. Must
+        NOT be used to gate crop-handle visibility/hit-testing — an
+        uncropped image still needs edge handles so the artist can create
+        the first crop; that was a real regression caught in review
+        (2026-08-07), where gating on this hid the only way to ever crop a
+        freshly-imported image.
+        """
         return (
             self._crop.x() == 0
             and self._crop.y() == 0
@@ -583,7 +593,7 @@ class ReferenceImageItem(InteractiveItem):
         bottom at y=+h/2 (where w,h = natural_size(), which already
         accounts for the current crop).
         """
-        if not self._ui_active or self._locked or self._crop_is_full():
+        if not self._ui_active or self._locked:
             return None
         view = self._view()
         if view is None:
@@ -733,7 +743,7 @@ class ReferenceImageItem(InteractiveItem):
         self.prepareGeometryChange()
         self._crop = QRect(rect)
         self._handles.reposition()
-        self._handles.set_crop_handles_visible(self._ui_active and not self._locked and not self._crop_is_full())
+        self._handles.set_crop_handles_visible(self._ui_active and not self._locked)
         self.update()
 
     # -- Qt overrides ---------------------------------------------------

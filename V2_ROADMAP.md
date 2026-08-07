@@ -185,11 +185,11 @@ infrastructure to do move/edit actions correctly.*
   visibility/lock tree
 - ✅ Save-time thumbnail generation (format already supports it)
 - ✅ Recent Projects / start screen using those thumbnails
-- 🟨 Properties panel visual pass: live numeric readouts ✅ (vanishing
+- ✅ Properties panel visual pass: live numeric readouts (vanishing
   point/horizon coordinates are now editable, not a read-only label);
-  cleaner crop flow — only partially: Escape now exits crop mode, but
-  the two-step Apply/Cancel button flow itself is unchanged. Candidate
-  for Section 7.
+  cleaner crop flow — done in v1.3 ("crop workflow" commit): crop is now
+  direct in-place edge-handle manipulation, no Crop…/Apply/Cancel
+  buttons or crop mode to enter/exit.
 
 ### Phase 2 — Precision Tools for Traditional Painters — 🟨 partial
 *Directly serves the "prepare before you paint" mission; each is additive,
@@ -332,10 +332,6 @@ phase's own commit — not an oversight — kept here so they aren't lost:
   Needs a custom `QTreeWidget` item delegate; the icons are small and
   always-visible instead for now, which is a reasonable permanent state
   too if hover-reveal turns out not to be worth the delegate complexity.
-- **Cleaner crop flow.** Carried over from Phase 1's "partial" status
-  above — Escape now exits crop mode, but entering/applying/cancelling
-  is still a three-button flow (Crop…/Apply Crop/Cancel) rather than a
-  more direct in-place drag-to-crop gesture.
 - **A cross-project reference library.** Right now every imported image
   lives and dies inside one project's `.atelier` zip. A personal,
   taggable collection independent of any one painting — drag into any

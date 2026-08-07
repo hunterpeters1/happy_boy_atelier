@@ -187,7 +187,20 @@ you'll read/write the real user's actual registry-backed settings.
 move/scale/rotate transform widget (eight resize handles + one rotate
 handle) used by movable/scalable/rotatable items — currently reference
 images. Corner drags default to independent width/height scaling
-(free-transform); hold Shift to lock aspect ratio.
+(free-transform); hold Shift to lock aspect ratio. The same manager also
+owns four edge (left/right/top/bottom midpoint) handles for crop —
+`HandleFrame.set_crop_handles_visible()` — shown any time a reference
+image is selected and unlocked, same condition as the corner/rotate
+handles, **not** gated on whether a crop is already applied: dragging an
+edge inward from the full-image bounds is how the first crop gets
+created, so gating on "crop already non-full" (a real bug caught in
+review right after v1.3 landed) makes cropping impossible for every
+freshly-imported image. Actual hit-testing/drag handling for both corner
+and edge handles lives in `ReferenceImageItem` itself, not on the handle
+items — see the corner-handle docstring in `handle_frame.py` for the Qt
+child-over-transformed-parent reason. Crop drags commit one
+`CropItemCommand` on release (`ReferenceImageItem._commit_crop()`), the
+same pattern as move/resize/rotate's `TransformCommand`.
 
 **Interactive painting vs. export/render (`app/layers/reference_layer.py`,
 `app/canvas/canvas_scene.py`, `app/atelier_io.py`):** `ReferenceImageItem`

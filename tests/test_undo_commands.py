@@ -303,30 +303,38 @@ def test_crop_does_not_interfere_with_resize(qapp):
     assert item.scale_y() == 2.0
 
 
-def test_crop_edge_handles_hidden_when_crop_is_full(qapp):
-    """Edge handles are only visible when there's an active (non-full)
-    crop — they shouldn't clutter the canvas when the image is uncropped."""
+def test_crop_edge_handles_available_on_fresh_uncropped_image(qapp):
+    """Edge handles must be visible on a freshly-imported, never-cropped
+    image — that's the only UI path to create a first crop (drag mechanics
+    themselves, working from a full crop, are already covered by
+    test_crop_drag_pushes_one_command_not_per_frame above). Gating
+    visibility on "crop already applied" (the pre-fix behavior) made
+    cropping impossible for every newly imported image, since
+    build_image_item() never seeds a non-full crop — a real image can
+    never reach this test's non-full-crop state through the UI on its
+    own. Regression coverage for that bug, found in review of commit
+    7548a5d."""
     scene = _scene(qapp)
     pixmap = QPixmap(100, 100)
     item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
 
-    # No crop = edge handles hidden.
     item.set_ui_active(True)
     assert item._crop_is_full() is True
-    # Edge handles exist but are not visible.
+    # Edge handles are visible even though no crop has ever been applied.
     edge_visible = all(h.isVisible() for h in item._handles._edges)
-    assert not edge_visible
+    assert edge_visible
 
-    # Apply a crop — edge handles become visible.
+    # After a crop is applied and then reset back to full, handles must
+    # still be available — cropping is not a one-shot action.
     item.set_crop(QRect(10, 10, 50, 50))
     assert item._crop_is_full() is False
     edge_visible = all(h.isVisible() for h in item._handles._edges)
     assert edge_visible
 
-    # Reset crop — edge handles hidden again.
     item.reset_crop()
+    assert item._crop_is_full() is True
     edge_visible = all(h.isVisible() for h in item._handles._edges)
-    assert not edge_visible
+    assert edge_visible
 
 
 # -- Validation pass (per Hunter's Phase 0 undo-reliability checklist) ------------
