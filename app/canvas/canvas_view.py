@@ -203,6 +203,18 @@ class CanvasView(QGraphicsView):
             # Crop is direct manipulation via edge handles on the canvas —
             # no context menu entry needed (the artist just grabs an edge
             # handle when the image has a crop applied).
+            # -- PureRef-inspired quick transforms (reference images only) --
+            if hasattr(item, "flip_horizontal"):
+                menu.addSeparator()
+                flip_h_action = menu.addAction("Flip Horizontal")
+                flip_h_action.triggered.connect(item.flip_horizontal)
+                flip_v_action = menu.addAction("Flip Vertical")
+                flip_v_action.triggered.connect(item.flip_vertical)
+                menu.addSeparator()
+                magnify_action = menu.addAction("Magnify 2×")
+                magnify_action.triggered.connect(item.magnify)
+                demag_action = menu.addAction("Shrink to 50%")
+                demag_action.triggered.connect(item.demagnify)
         else:
             fit_action = menu.addAction(icons.icon("fit"), "Fit Canvas")
             fit_action.triggered.connect(lambda: self.fit_canvas(scene.canvas_rect()))
@@ -229,7 +241,14 @@ class CanvasView(QGraphicsView):
         drawBackground()'s freshly-repainted COLOR_CANVAS_BG immediately,
         instead of only after the next restart.
         """
-        self.setBackgroundBrush(QColor(C.COLOR_CANVAS_BG))
+        scene = self.scene()
+        bg = getattr(scene, "_bg_color", C.COLOR_CANVAS_BG) if scene else C.COLOR_CANVAS_BG
+        self.setBackgroundBrush(QColor(bg))
+        self.viewport().update()
+
+    def set_desk_color(self, color: str) -> None:
+        """Update the view's background to match a new desk color."""
+        self.setBackgroundBrush(QColor(color))
         self.viewport().update()
 
     # -- ruler overlay ----------------------------------------------------

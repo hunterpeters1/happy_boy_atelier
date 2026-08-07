@@ -110,6 +110,8 @@ class _RowButtons(QWidget):
     lock_toggled = Signal(bool)
     move_forward_clicked = Signal()
     move_backward_clicked = Signal()
+    send_to_back_clicked = Signal()
+    bring_to_front_clicked = Signal()
 
     def __init__(self, *, visible: bool, locked: bool, show_visibility: bool = True,
                  show_lock: bool = True, can_move_forward: bool | None = None,
@@ -151,6 +153,25 @@ class _RowButtons(QWidget):
             self.down_btn.setEnabled(bool(can_move_backward))
             self.down_btn.clicked.connect(self.move_backward_clicked)
             layout.addWidget(self.down_btn)
+
+            # Absolute reordering: send to back / bring to front
+            self.to_back_btn = QToolButton()
+            self.to_back_btn.setProperty("role", "compact")
+            self.to_back_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
+            self.to_back_btn.setIcon(icons.icon("reorder_down", _ROW_ICON_PX))
+            self.to_back_btn.setAutoRaise(True)
+            self.to_back_btn.setToolTip("Send to back (bottom of layer)")
+            self.to_back_btn.clicked.connect(self.send_to_back_clicked)
+            layout.addWidget(self.to_back_btn)
+
+            self.to_front_btn = QToolButton()
+            self.to_front_btn.setProperty("role", "compact")
+            self.to_front_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
+            self.to_front_btn.setIcon(icons.icon("reorder_up", _ROW_ICON_PX))
+            self.to_front_btn.setAutoRaise(True)
+            self.to_front_btn.setToolTip("Bring to front (top of layer)")
+            self.to_front_btn.clicked.connect(self.bring_to_front_clicked)
+            layout.addWidget(self.to_front_btn)
         # Split alignment: reorder buttons (when present) pin to column 1's
         # left edge — immediately after column 0 ends, not necessarily
         # flush against variable-length label text, since column widths are
@@ -417,6 +438,8 @@ class LayersPanel(QWidget):
         if group is not None:
             buttons.move_forward_clicked.connect(lambda o=obj, g=group: self._reorder_item(g, o, True))
             buttons.move_backward_clicked.connect(lambda o=obj, g=group: self._reorder_item(g, o, False))
+            buttons.send_to_back_clicked.connect(lambda o=obj, g=group: self._send_to_back_item(g, o))
+            buttons.bring_to_front_clicked.connect(lambda o=obj, g=group: self._bring_to_front_item(g, o))
         self._set_row_widget(row, 1, buttons)
         return row
 
@@ -426,6 +449,18 @@ class LayersPanel(QWidget):
             return
         from ..canvas.undo_commands import ReorderItemCommand
         self.scene.undo_stack.push(ReorderItemCommand(group, item, forward))
+
+    def _send_to_back_item(self, group, item) -> None:
+        if not group.can_send_to_back(item):
+            return
+        from ..canvas.undo_commands import SendToBackCommand
+        self.scene.undo_stack.push(SendToBackCommand(group, item))
+
+    def _bring_to_front_item(self, group, item) -> None:
+        if not group.can_bring_to_front(item):
+            return
+        from ..canvas.undo_commands import BringToFrontCommand
+        self.scene.undo_stack.push(BringToFrontCommand(group, item))
 
     def _add_tool_row(self, parent: QTreeWidgetItem, tools: list[tuple[str, str, str]]) -> None:
         """tools: list of (tool_id, icon_name, tooltip)."""

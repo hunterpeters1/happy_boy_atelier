@@ -207,6 +207,79 @@ class ReorderItemCommand(QUndoCommand):
             self._group.move_item_forward(self._item)
 
 
+class SendToBackCommand(QUndoCommand):
+    """Moves `item` to the very bottom (index 0) of its layer's stack.
+    `group` must expose move_item_to_bottom(item) and index_of(item).
+    Captures the old index on each redo (not just __init__) so an
+    interleaved reorder/restore cycle still restores correctly.
+    """
+
+    def __init__(self, group, item):
+        super().__init__("Send to back")
+        self._group = group
+        self._item = item
+        self._old_index: int | None = None
+
+    def redo(self) -> None:
+        self._old_index = self._group.index_of(self._item)
+        self._group.move_item_to_bottom(self._item)
+
+    def undo(self) -> None:
+        if self._old_index is not None:
+            self._group.add_existing(self._item, self._old_index)
+
+
+class BringToFrontCommand(QUndoCommand):
+    """Moves `item` to the very top of its layer's stack. Same
+    capture-pattern as SendToBackCommand but targeting the end.
+    """
+
+    def __init__(self, group, item):
+        super().__init__("Bring to front")
+        self._group = group
+        self._item = item
+        self._old_index: int | None = None
+
+    def redo(self) -> None:
+        self._old_index = self._group.index_of(self._item)
+        self._group.move_item_to_top(self._item)
+
+    def undo(self) -> None:
+        if self._old_index is not None:
+            self._group.add_existing(self._item, self._old_index)
+
+
+class CopyItemCommand(QUndoCommand):
+    """Duplicates `clone` (already constructed, not yet added to the scene)
+    as a new sibling of `item` in `group`. On redo the clone is added to
+    the group at the index right after `item`; on undo it's removed.
+    Using a pre-built clone (rather than a factory) keeps the command
+    simple and avoids re-running construction logic on each redo — the
+    clone's full state (position, scale, rotation, note text, etc.) is
+    captured once at duplicate time and faithfully restored by re-adding.
+    """
+
+    def __init__(self, group, item, clone, label: str = "Duplicate"):
+        super().__init__(label)
+        self._group = group
+        self._item = item
+        self._clone = clone
+        self._index: int | None = None
+
+    def redo(self) -> None:
+        """On first redo, captures the insertion index (one slot after
+        the original item) and adds the clone. On subsequent redos
+        (after an undo), re-adds the clone at the same index.
+        """
+        if self._index is None or self._clone.scene() is None:
+            self._index = max(0, (self._group.index_of(self._item) or 0) + 1)
+        self._group.add_existing(self._clone, self._index)
+
+    def undo(self) -> None:
+        if self._clone is not None:
+            self._group.remove_item(self._clone)
+
+
 class SetPropertyCommand(QUndoCommand):
     """Generic single-value property change: opacity, grid line weight,
     grid spacing, arrow endpoints, scale, rotation, and similar. `setter`

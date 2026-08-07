@@ -311,6 +311,32 @@ class ReferenceImageItem(InteractiveItem):
         self._scale_y = sy
         self.setTransform(QTransform().scale(sx, sy))
 
+    # -- flip / magnify (PureRef-inspired quick transforms) --------------------
+    FLIP_FACTOR = 0.5  # 50% scale on one axis = a visible flip
+    MAGNIFY_FACTOR = 2.0  # one-click 2× zoom-in
+
+    def flip_horizontal(self) -> None:
+        """Flip the image left-right via a negative X scale. Uses an
+        absolute scale (not a relative toggle) so repeated flips return to
+        the original orientation — scale_x goes from +v to -v to +v,
+        rather than accumulating.
+        """
+        new_sx = -abs(self._scale_x) if self._scale_x > 0 else abs(self._scale_x)
+        self.set_scale_xy(new_sx, self._scale_y)
+
+    def flip_vertical(self) -> None:
+        """Flip the image top-bottom via a negative Y scale."""
+        new_sy = -abs(self._scale_y) if self._scale_y > 0 else abs(self._scale_y)
+        self.set_scale_xy(self._scale_x, new_sy)
+
+    def magnify(self) -> None:
+        """One-click 2× zoom-in, uniformly."""
+        self.set_scale_factor(self.scale_factor() * self.MAGNIFY_FACTOR)
+
+    def demagnify(self) -> None:
+        """One-click 2× zoom-out, uniformly."""
+        self.set_scale_factor(self.scale_factor() / self.MAGNIFY_FACTOR)
+
     # -- Study Blur (see canvas/study_blur.py) -----------------------------
     def blur_amount(self) -> float:
         return self._blur_amount

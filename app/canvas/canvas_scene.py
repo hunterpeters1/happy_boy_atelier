@@ -5,7 +5,7 @@ full layer stack.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QLineF, QRectF, Qt, Signal
+from PySide6.QtCore import QLineF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPen, QTransform, QUndoStack
 from PySide6.QtWidgets import QGraphicsScene
 
@@ -18,7 +18,7 @@ from ..layers.composition_layer import CompositionLayerGroup, FocalPointItem, Mo
 from ..layers.perspective_layer import PerspectiveLayerGroup
 from ..layers.lighting_layer import LightingLayerGroup, LightSourceItem, DirectionArrowItem
 from ..layers.guide_overlay import GuidesLayerGroup
-from .undo_commands import AddItemCommand, DeleteItemCommand
+from .undo_commands import AddItemCommand, CopyItemCommand, DeleteItemCommand, SendToBackCommand, BringToFrontCommand
 
 # tools that place a single item on one click
 _SINGLE_CLICK_TOOLS = {"focal_primary", "focal_secondary", "note_comp", "light_source", "note_light"}
@@ -42,13 +42,16 @@ class CanvasScene(QGraphicsScene):
     color_hovered = Signal(object)
     color_sampled = Signal(QColor)
 
-    def __init__(self, canvas_spec: CanvasSpec):
+    def __init__(self, canvas_spec: CanvasSpec, bg_color: str | None = None):
         super().__init__()
         # Content-mutation undo/redo (Phase 0.2). Scoped to artwork setup
         # changes only — lock toggles and layer/guide visibility are
         # deliberately excluded, see canvas/undo_commands.py.
         self.undo_stack = QUndoStack(self)
         self.canvas_spec = canvas_spec
+        # Desk color behind the canvas rect — defaults to COLOR_CANVAS_BG
+        # for back-compat with older .atelier files that don't carry it.
+        self._bg_color = bg_color or C.COLOR_CANVAS_BG
         w = canvas_spec.width_in * C.SCENE_PX_PER_INCH
         h = canvas_spec.height_in * C.SCENE_PX_PER_INCH
         self._canvas_rect = QRectF(0, 0, w, h)
@@ -180,7 +183,7 @@ class CanvasScene(QGraphicsScene):
         return self._canvas_rect
 
     def drawBackground(self, painter, rect) -> None:
-        painter.fillRect(rect, QColor(C.COLOR_CANVAS_BG))
+        painter.fillRect(rect, QColor(self._bg_color))
         shadow = self._canvas_rect.adjusted(6, 8, 6, 8)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(QColor(0, 0, 0, 90)))
@@ -188,6 +191,16 @@ class CanvasScene(QGraphicsScene):
         painter.setBrush(QBrush(QColor(C.COLOR_CANVAS)))
         painter.setPen(QPen(QColor(C.COLOR_CANVAS_EDGE), 2))
         painter.drawRect(self._canvas_rect)
+
+    def set_bg_color(self, color: str) -> None:
+        """Update the desk color behind the canvas rect. Updates the
+        scene's own drawBackground (immediate on next repaint) and
+        propagates to all views' background brushes.
+        """
+        self._bg_color = color
+        for view in self.views():
+            if hasattr(view, "set_desk_color"):
+                view.set_desk_color(color)
 
     # -- tools -----------------------------------------------------------
     def set_active_tool(self, tool: str | None) -> None:
@@ -445,6 +458,100 @@ class CanvasScene(QGraphicsScene):
         finally:
             if multi:
                 self.undo_stack.endMacro()
+
+    def duplicate_selected_items(self) -> None:
+        """Duplicate the currently selected items — one undo step per item
+        (or one macro for multi-select). Each clone is placed slightly
+        offset from its original and becomes the new selection.
+        """
+        items = self.selected_items()
+        if not items:
+            return
+        # Resolve each item to its owning layer group + the factory that
+        # creates a copy positioned just offset from the original.
+        clones = []
+        for item in items:
+            clone = self._build_duplicate(item)
+            if clone is not None:
+                clones.append((clone, item))
+        if not clones:
+            return
+        multi = len(clones) > 1
+        if multi:
+            self.undo_stack.beginMacro("Duplicate Selected")
+        try:
+            for clone, original in clones:
+                group = self._group_for_item(original)
+                if group is not None:
+                    self.undo_stack.push(CopyItemCommand(group, original, clone))
+        finally:
+            if multi:
+                self.undo_stack.endMacro()
+        # Select the new clones
+        self.set_selection([c for c, _ in clones])
+
+    def _build_duplicate(self, item) -> object:
+        """Return a *constructed-but-not-added* clone of `item`, or None
+        if the item type has no duplication support. The clone is a fresh
+        Python object with its own state, positioned slightly offset.
+        """
+        if isinstance(item, ReferenceImageItem):
+            from ..layers.reference_layer import ReferenceImageItem as _RI
+            clone = _RI(
+                image_id=item.image_id + "_copy",
+                source_pixmap=item._source_pixmap,
+                base_w=item._base_w,
+                base_h=item._base_h,
+                crop=QRect(item._crop),
+                display_name=item.display_name + " (copy)",
+                original_format=item.original_format,
+                original_file_size=item.original_file_size,
+            )
+            clone.setPos(item.pos().x() + 30, item.pos().y() + 30)
+            clone.setRotation(item.rotation())
+            clone.set_scale_xy(item._scale_x, item._scale_y)
+            clone.setOpacity(item.opacity())
+            clone.setVisible(item.isVisible())
+            clone.set_locked(item.is_locked())
+            clone.set_blur_amount(item.blur_amount())
+            clone.set_line_clarity(item.line_clarity())
+            return clone
+        return None
+
+    def _group_for_item(self, item):
+        """Return the layer group that owns `item`, or None if not found."""
+        if item in self.reference_layer.items():
+            return self.reference_layer
+        for layer in (self.composition_layer, self.lighting_layer):
+            if hasattr(layer, "all_items") and item in layer.all_items():
+                return layer
+        return None
+
+    def send_to_back_selected(self) -> None:
+        items = self.selected_items()
+        if not items:
+            return
+        self.undo_stack.beginMacro("Send to Back")
+        try:
+            for item in items:
+                group = self._group_for_item(item)
+                if group is not None:
+                    self.undo_stack.push(SendToBackCommand(group, item))
+        finally:
+            self.undo_stack.endMacro()
+
+    def bring_to_front_selected(self) -> None:
+        items = self.selected_items()
+        if not items:
+            return
+        self.undo_stack.beginMacro("Bring to Front")
+        try:
+            for item in items:
+                group = self._group_for_item(item)
+                if group is not None:
+                    self.undo_stack.push(BringToFrontCommand(group, item))
+        finally:
+            self.undo_stack.endMacro()
 
     # -- serialization -----------------------------------------------------
     def to_manifest_layers(self):

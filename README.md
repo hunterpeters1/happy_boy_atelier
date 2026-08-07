@@ -113,6 +113,20 @@ Each imported photo is its own object:
   commit-on-release behavior as move/resize/rotate. No separate crop
   mode to enter or exit. Properties panel has a "Reset Crop" button to
   clear back to the full source image (disabled on locked images).
+- **Flip Horizontal / Flip Vertical** — right-click a reference image for
+  one-click mirror flips (via negative axis scaling). Useful for checking
+  composition asymmetries. Also available in the Edit menu.
+- **Magnify 2× / Shrink to 50%** — one-click uniform scale-up / scale-down
+  from the context menu, handy for quickly sizing references without
+  fiddling with the Properties spin box.
+- **Duplicate** — Edit > Duplicate (Ctrl+D), or right-click → "Duplicate",
+  creates a copy of the selected image placed slightly offset, ready to
+  move around. Fully undoable. Also supports multi-selection (duplicates
+  all selected items in one undo step).
+- **Send to Back / Bring to Front** — right-click a reference image (or
+  use the up/down/to-back/to-front buttons in the Project Panel's row) to
+  adjust its stacking order within the reference layer. Step-by-step
+  reorder and absolute to-back/to-front, all undoable.
 - **Study Blur** — Properties panel has **Blur** and **Line Clarity**
   sliders (0–100) per image. This is a "squint test": blurs the image
   while boosting contrast on dark edges/lines, so you can judge overall
@@ -196,17 +210,20 @@ needed.
   every item placed in it (not just reference images), each a named,
   searchable row with inline visibility/lock toggles. A search box at
   the top filters items by name across all layers. Reference/composition/
-  lighting rows have up/down buttons to reorder within their layer's
-  stacking position (perspective and guide items don't reorder).
+  lighting rows have up/down buttons (step-by-step reorder) plus
+  to-back/to-front buttons (absolute positioning) for adjusting stacking
+  position within their layer (perspective and guide items don't reorder).
 - **Properties panel** (right dock) — edits whatever's currently
   selected. Select 2+ items to get a **Batch Edit** section: opacity
   nudges (±5%), scale nudges (×0.95/×1.05, only shown if every selected
   item supports scaling), and **align left/right/top/bottom** buttons
   that line up all selected items to the group's min/max edge.
-- **Right-click** an item for Delete / Lock / Unlock; right-click empty
-  canvas for Fit Canvas, plus Cancel Tool if one's armed. Cropping a
-  reference image is done via its on-canvas edge handles, not the
-  context menu — see Reference images above.
+- **Right-click** an item for Delete / Lock / Unlock; right-click an
+  unlocked reference image for Flip Horizontal/Vertical, Magnify 2×,
+  Shrink to 50%, and Duplicate; right-click empty canvas for Fit Canvas,
+  plus Cancel Tool if one's armed. Cropping a reference image is done via
+  its on-canvas edge handles, not the context menu — see Reference images
+  above.
 - **Ctrl+K** — command palette. It's built by walking the entire live
   menu bar, so *every* menu action is searchable there, including ones
   that are easy to forget exist (Show Rulers, Appearance themes, etc.).
@@ -217,6 +234,12 @@ needed.
 - **Zoom** — plain mouse wheel (no modifier needed), 5%–2400% range;
   View > Zoom In/Out (Ctrl+=/Ctrl+-) or Fit Canvas (Ctrl+0).
 - **Rulers** — View > Show Rulers (Ctrl+R), on by default.
+- **Desk Color** — View > Change Desk Color… opens a color picker for the
+  void behind the canvas rect (the "desk" the painting sits on). Per-project
+  and saved in the .atelier file — each painting can have a different desk
+  color to match its intended framing (e.g. mid-tone grey for charcoal
+  studies, warm paper for pastels). Defaults to near-black, matching the
+  previous fixed behavior.
 
 ### Locking
 

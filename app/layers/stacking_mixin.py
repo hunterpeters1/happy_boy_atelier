@@ -61,6 +61,48 @@ class StackedLayerMixin:
             return None
         return bucket.index(item)
 
+    def move_item_to_top(self, item) -> bool:
+        """Move `item` to the very end (top) of its bucket.
+        Used by BringToFrontCommand. Returns False if the item isn't
+        in the bucket or is already at the top.
+        """
+        bucket = self._bucket_for(item)
+        if bucket is None or item not in bucket:
+            return False
+        i = bucket.index(item)
+        if i == len(bucket) - 1:
+            return False
+        bucket.pop(i)
+        bucket.append(item)
+        self._reassign_z()
+        return True
+
+    def move_item_to_bottom(self, item) -> bool:
+        """Move `item` to index 0 (bottom) of its bucket.
+        Used by SendToBackCommand. Returns False if the item isn't
+        in the bucket or is already at the bottom.
+        """
+        bucket = self._bucket_for(item)
+        if bucket is None or item not in bucket:
+            return False
+        i = bucket.index(item)
+        if i == 0:
+            return False
+        bucket.pop(i)
+        bucket.insert(0, item)
+        self._reassign_z()
+        return True
+
+    def can_send_to_back(self, item) -> bool:
+        """True if `item` can be moved to the bottom of its bucket."""
+        bucket = self._bucket_for(item)
+        return bucket is not None and item in bucket and bucket.index(item) > 0
+
+    def can_bring_to_front(self, item) -> bool:
+        """True if `item` can be moved to the top of its bucket."""
+        bucket = self._bucket_for(item)
+        return bucket is not None and item in bucket and bucket.index(item) < len(bucket) - 1
+
     def remove_item(self, item) -> None:
         bucket = self._bucket_for(item)
         if bucket is not None and item in bucket:

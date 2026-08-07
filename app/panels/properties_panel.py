@@ -132,7 +132,9 @@ class PropertiesPanel(QWidget):
         self.scale_spin.setToolTip(
             "Uniform scale (sets both width and height equally). For an "
             "independent width/height resize, drag a corner handle on the "
-            "canvas instead — hold Shift while dragging to lock proportions."
+            "canvas instead — hold Shift while dragging to lock proportions. "
+            "Negative (flipped) images show absolute scale here; use the "
+            "context menu's Flip Horizontal/Vertical for flipping."
         )
         self.scale_spin.valueChanged.connect(self._on_scale_changed)
         scale_row.addWidget(self.scale_spin)
@@ -379,7 +381,12 @@ class PropertiesPanel(QWidget):
                     "Unlock this image to reset crop." if item.is_locked() else ""
                 )
                 self.delete_btn.setVisible(True)
-                self.scale_spin.setValue(item.scale_factor())
+                # Use absolute scale for display when flipped (negative) —
+                # the spin is 0.05–40, can't show negative. The sign is
+                # preserved on the item itself; set_scale_factor applies
+                # the absolute value, so a flipped image stays flipped.
+                display_scale = abs(item.scale_factor())
+                self.scale_spin.setValue(display_scale)
                 self.rotation_spin.setValue(item.rotation())
                 self.opacity_slider.setValue(int(item.opacity() * 100))
                 self.blur_slider.setValue(int(item.blur_amount()))
@@ -446,7 +453,12 @@ class PropertiesPanel(QWidget):
         if self._scale_baseline is None:
             self._scale_baseline = self._scale_last
             self._scale_edit_item = self._current
-        self._current.set_scale_factor(value)
+        # Preserve the sign of any flipped axis — set_scale_factor sets both
+        # axes to the same positive value, losing a flip. If the current
+        # scale_x or scale_y is negative, restore that sign here.
+        sx = value if self._current._scale_x > 0 else -value
+        sy = value if self._current._scale_y > 0 else -value
+        self._current.set_scale_xy(sx, sy)
         self._scale_last = value
 
     def _commit_scale(self) -> None:

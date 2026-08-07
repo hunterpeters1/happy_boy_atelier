@@ -56,6 +56,12 @@ class ProjectMeta:
     # QSettings()) and deliberately excluded from Undo/Redo, same as lock
     # state above -- a mixing reference, not artwork content.
     color_swatches: list[str] = field(default_factory=list)
+    # Desk color — the void behind the physical canvas rect. Per-project
+    # so each painting can match its intended framing (e.g. a charcoal
+    # sketch on a mid-tone grey desk, or a pastel study against warm
+    # paper). Defaults to the canvas edge color (near-black) for back-compat
+    # with every .atelier file saved before this field existed.
+    bg_color: str = C.COLOR_CANVAS_BG
 
     def touch(self) -> None:
         self.modified_at = _now_iso()
@@ -70,6 +76,7 @@ class ProjectMeta:
             modified_at=d.get("modified_at", _now_iso()),
             locked=bool(d.get("locked", False)),
             color_swatches=list(d.get("color_swatches", [])),
+            bg_color=d.get("bg_color", C.COLOR_CANVAS_BG),
         )
 
 

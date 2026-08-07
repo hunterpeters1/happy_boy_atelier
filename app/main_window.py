@@ -6,9 +6,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QPointF, QSettings, QSize, QStandardPaths, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QColorDialog,
     QDockWidget,
     QFileDialog,
     QLabel,
@@ -140,7 +141,7 @@ class MainWindow(QMainWindow):
             spec = CanvasSpec.from_dict(manifest.get("canvas", {}))
             self.meta = ProjectMeta.from_dict(manifest.get("meta", {}))
 
-            scene = CanvasScene(spec)
+            scene = CanvasScene(spec, bg_color=self.meta.bg_color)
             scene.load_manifest_layers(manifest, images)
             scene.set_global_locked(self.meta.locked)
 
@@ -185,6 +186,9 @@ class MainWindow(QMainWindow):
     def _rebuild_workspace(self, scene: CanvasScene) -> None:
         self.scene = scene
         self.view = CanvasView(scene, self)
+        # Set the view's desk color to match the scene's bg_color, so the
+        # void beyond the canvas rect matches what drawBackground paints.
+        self.view.set_desk_color(self.scene._bg_color)
         self.setCentralWidget(self.view)
         self.view.zoom_changed.connect(self._on_zoom_changed)
         # A fresh CanvasView always starts with rulers visible; keep the
@@ -339,6 +343,9 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.redo_action)
         edit_menu.addSeparator()
         self._add_action(edit_menu, "Delete Selected", "Del", self._delete_selected, icon_name="delete")
+        self._add_action(edit_menu, "Duplicate", "Ctrl+D", self._duplicate_selected, icon_name="image")
+        self._add_action(edit_menu, "Bring to Front", None, self._bring_to_front)
+        self._add_action(edit_menu, "Send to Back", None, self._send_to_back)
         edit_menu.addSeparator()
         self.lock_action = self._add_action(
             edit_menu, "Lock Setup", "Ctrl+L", self.toggle_lock_setup, checkable=True, icon_name="lock"
@@ -361,6 +368,7 @@ class MainWindow(QMainWindow):
         )
         self.ruler_action.setChecked(True)
         view_menu.addSeparator()
+        self._add_action(view_menu, "Change Desk Color…", None, self._change_desk_color, icon_name="eye")
         self.palette_action = self._add_action(
             view_menu, "Command Palette…", "Ctrl+K", self.open_command_palette
         )
@@ -408,6 +416,21 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.lock_action)
 
     # -- appearance -----------------------------------------------------
+    def _change_desk_color(self) -> None:
+        """Open a color dialog to pick the desk color (the void behind the
+        canvas rect). This is a per-project, non-undoable workflow
+        preference — saved in the .atelier file's meta.bg_color field.
+        """
+        if self.scene is None:
+            return
+        current = QColor(self.meta.bg_color)
+        color = QColorDialog.getColor(current, self, "Choose Desk Color")
+        if color.isValid() and color.name() != current.name():
+            self.meta.bg_color = color.name()
+            self.scene.set_bg_color(self.meta.bg_color)
+            self.view.set_desk_color(self.meta.bg_color)
+            debug_tools.log(f"desk color -> {self.meta.bg_color}")
+
     def _set_theme(self, mode: themes.ThemeMode) -> None:
         if mode == self._theme_mode:
             return
@@ -606,7 +629,7 @@ class MainWindow(QMainWindow):
     def _new_project(self, spec: CanvasSpec) -> None:
         self.current_path = None
         self.meta = ProjectMeta()
-        scene = CanvasScene(spec)
+        scene = CanvasScene(spec, bg_color=self.meta.bg_color)
         self._rebuild_workspace(scene)
 
     def new_project_dialog(self) -> None:
@@ -739,7 +762,7 @@ class MainWindow(QMainWindow):
         spec = CanvasSpec.from_dict(manifest.get("canvas", {}))
         self.meta = ProjectMeta.from_dict(manifest.get("meta", {}))
 
-        scene = CanvasScene(spec)
+        scene = CanvasScene(spec, bg_color=self.meta.bg_color)
         scene.load_manifest_layers(manifest, images)
         scene.set_global_locked(self.meta.locked)
 
@@ -816,6 +839,52 @@ class MainWindow(QMainWindow):
         debug_tools.log(f"deleted {n} selected item(s)")
         self.layers_panel.refresh_structure()
         self.properties_panel.refresh()
+
+    def _duplicate_selected(self) -> None:
+        if self.scene is None:
+            return
+        self.scene.duplicate_selected_items()
+        self.layers_panel.refresh_structure()
+        self.properties_panel.refresh()
+
+    def _bring_to_front(self) -> None:
+        if self.scene is None:
+            return
+        self.scene.bring_to_front_selected()
+        self.properties_panel.refresh()
+
+    def _send_to_back(self) -> None:
+        if self.scene is None:
+            return
+        self.scene.send_to_back_selected()
+        self.properties_panel.refresh()
+
+    def _flip_horizontal(self) -> None:
+        if self.scene is None:
+            return
+        items = [i for i in self.scene.selected_items() if hasattr(i, "flip_horizontal")]
+        if not items:
+            return
+        for item in items:
+            item.flip_horizontal()
+
+    def _flip_vertical(self) -> None:
+        if self.scene is None:
+            return
+        items = [i for i in self.scene.selected_items() if hasattr(i, "flip_vertical")]
+        if not items:
+            return
+        for item in items:
+            item.flip_vertical()
+
+    def _magnify_selected(self) -> None:
+        if self.scene is None:
+            return
+        items = [i for i in self.scene.selected_items() if hasattr(i, "magnify")]
+        if not items:
+            return
+        for item in items:
+            item.magnify()
 
     def closeEvent(self, event) -> None:
         # Clean-shutdown marker (Phase 0.3): a normal exit removes the

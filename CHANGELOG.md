@@ -153,6 +153,18 @@ sources, and direction arrows never rendered.
   single Scale field still sets both axes uniformly. `.atelier` files now
   store `scale_x`/`scale_y` alongside the legacy `scale` field, so older
   projects still open looking exactly as they did.
+- **Flip Horizontal / Flip Vertical**: right-click a reference image for
+  one-click mirror flips (negative axis scaling). Also in the Edit menu.
+- **Magnify 2× / Shrink to 50%** — one-click uniform scale-up / scale-down
+  from the context menu.
+- **Duplicate**: Edit > Duplicate (Ctrl+D) or right-click → "Duplicate".
+  Supports multi-selection (duplicates all selected items in one undo step).
+- **Send to Back / Bring to Front**: absolute stacking order within a
+  layer — right-click context menu, Edit menu, and Project Panel row
+  buttons (to-back/to-front alongside existing step-by-step up/down).
+- **Desk Color**: View > Change Desk Color… picks the void behind the
+  canvas rect. Per-project, saved in the .atelier file's meta.bg_color
+  field. Defaults to near-black for back-compat with older .atelier files.
 
 ## Unreleased — Phase 0 (foundation work, not yet version-tagged)
 
