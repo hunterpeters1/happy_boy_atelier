@@ -1,6 +1,6 @@
 """Undo/redo correctness tests — the highest-value file in this suite,
 since Phase 0.2 is almost entirely new mutation-path code that had never
-been executed before (see the "Honesty note" in PHASE_0_PLAN.md).
+been executed before (see the "Honesty note" in V2_ROADMAP.md).
 
 Builds a real, offscreen CanvasScene (via the qapp fixture) and exercises
 each command class exactly the way the UI does: mutate live state, push a
@@ -719,7 +719,7 @@ def test_set_perspective_mode_command_undo_redo(qapp):
 
 
 def test_perspective_mode_switch_is_lossless_on_undo(qapp):
-    # The specific quality improvement called out in PHASE_0_PLAN.md:
+    # The specific quality improvement called out in V2_ROADMAP.md:
     # switching 1pt -> 2pt used to lose the original 1pt VP position on
     # switching back, because set_mode() always regenerates fresh
     # defaults. SetPerspectiveModeCommand's undo path must restore the

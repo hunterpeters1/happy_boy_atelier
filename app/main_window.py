@@ -149,7 +149,7 @@ class MainWindow(QMainWindow):
             # last-clean-save state, so leave the undo stack dirty.
             self.current_path = None
             self._rebuild_workspace(scene)
-            self.layers_panel.refresh_reference_list()
+            self.layers_panel.refresh_structure()
             self.lock_action.setChecked(self.meta.locked)
             self._update_lock_banner()
             self.statusBar().showMessage("Recovered your last unsaved session — Save to keep it.", 6000)
@@ -285,8 +285,7 @@ class MainWindow(QMainWindow):
             cmd_text = self.scene.undo_stack.command(_index - 1).text() if _index > 0 else "clean"
             debug_tools.log(f"undo_stack.index -> {_index} ({cmd_text})")
         self.properties_panel.refresh()
-        self.layers_panel.sync_from_scene()
-        self.layers_panel.refresh_reference_list()
+        self.layers_panel.refresh_structure()
 
     def _update_status_hint(self) -> None:
         if self.scene is None:
@@ -659,7 +658,7 @@ class MainWindow(QMainWindow):
             if multi:
                 self.scene.undo_stack.endMacro()
         debug_tools.log(f"imported {cascade} reference image(s)")
-        self.layers_panel.refresh_reference_list()
+        self.layers_panel.refresh_structure()
 
     def _build_manifest(self) -> tuple[dict, dict]:
         """Assemble the current (manifest, images) pair from live scene
@@ -746,7 +745,7 @@ class MainWindow(QMainWindow):
 
         self.current_path = path
         self._rebuild_workspace(scene)
-        self.layers_panel.refresh_reference_list()
+        self.layers_panel.refresh_structure()
         self.lock_action.setChecked(self.meta.locked)
         self._update_lock_banner()
         self._note_recent_file(path)
@@ -815,7 +814,7 @@ class MainWindow(QMainWindow):
         n = len(self.scene.selected_items())
         self.scene.delete_selected_items()
         debug_tools.log(f"deleted {n} selected item(s)")
-        self.layers_panel.refresh_reference_list()
+        self.layers_panel.refresh_structure()
         self.properties_panel.refresh()
 
     def closeEvent(self, event) -> None:

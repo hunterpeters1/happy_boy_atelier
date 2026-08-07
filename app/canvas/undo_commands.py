@@ -10,7 +10,7 @@ stay direct, un-undoable calls at their call sites.
 
 Every command here follows the same "capture on press, commit a single
 command on release, only if something changed" shape described in
-PHASE_0_PLAN.md, rather than pushing one command per intermediate drag
+V2_ROADMAP.md, rather than pushing one command per intermediate drag
 event.
 """
 

@@ -156,7 +156,7 @@ sources, and direction arrows never rendered.
 
 ## Unreleased — Phase 0 (foundation work, not yet version-tagged)
 
-Internal work per V2_ROADMAP.md / PHASE_0_PLAN.md — nothing here is a new
+Internal work per V2_ROADMAP.md — nothing here is a new
 user-facing feature; the goal is a foundation the V2 phases can build on
 without redoing work.
 

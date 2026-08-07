@@ -122,14 +122,8 @@ class InteractiveItem(QGraphicsObject):
             self.setCursor(Qt.ArrowCursor if locked else self._normal_cursor)
 
     # -- click-to-select ----------------------------------------------------
-    def _is_click_selectable(self) -> bool:
-        """Hook: suppress selection during a special interaction state
-        (e.g. a reference image mid-crop). True by default.
-        """
-        return True
-
     def mousePressEvent(self, event) -> None:
-        if not self._locked and self._is_click_selectable():
+        if not self._locked:
             select_on_left_click(self, event)
         self.begin_transform()
         super().mousePressEvent(event)

@@ -278,9 +278,8 @@ class LayersPanel(QWidget):
 
     # -- structural rebuild -------------------------------------------------
     def refresh_structure(self) -> None:
-        """Full rebuild from current scene state. Covers what the old
-        per-section refresh_reference_list()/sync_from_scene() each did
-        separately — both now alias to this, see bottom of the class.
+        """Full rebuild from current scene state. Call after any
+        add/delete/undo/redo that changes the layer tree structure.
         """
         for kind, row in self._layer_rows.items():
             self._expanded_default[kind] = row.isExpanded()
@@ -731,9 +730,3 @@ class LayersPanel(QWidget):
             btn.setChecked(tool == active_tool)
             btn.blockSignals(False)
 
-    # -- back-compat call points (MainWindow calls these by name) ----------
-    def refresh_reference_list(self) -> None:
-        self.refresh_structure()
-
-    def sync_from_scene(self) -> None:
-        self.refresh_structure()
