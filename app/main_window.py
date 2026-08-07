@@ -347,6 +347,11 @@ class MainWindow(QMainWindow):
         self._add_action(edit_menu, "Bring to Front", None, self._bring_to_front)
         self._add_action(edit_menu, "Send to Back", None, self._send_to_back)
         edit_menu.addSeparator()
+        self._add_action(edit_menu, "Flip Horizontal", None, self._flip_horizontal)
+        self._add_action(edit_menu, "Flip Vertical", None, self._flip_vertical)
+        self._add_action(edit_menu, "Magnify 2×", None, self._magnify_selected)
+        self._add_action(edit_menu, "Shrink to 50%", None, self._demagnify_selected)
+        edit_menu.addSeparator()
         self.lock_action = self._add_action(
             edit_menu, "Lock Setup", "Ctrl+L", self.toggle_lock_setup, checkable=True, icon_name="lock"
         )
@@ -865,8 +870,19 @@ class MainWindow(QMainWindow):
         items = [i for i in self.scene.selected_items() if hasattr(i, "flip_horizontal")]
         if not items:
             return
-        for item in items:
-            item.flip_horizontal()
+        # One undo step per user action, not one per item — matches
+        # duplicate_selected_items()/send_to_back_selected()'s convention
+        # (canvas/canvas_scene.py). Each item's flip_horizontal() already
+        # pushes its own TransformCommand; the macro just groups them.
+        multi = len(items) > 1
+        if multi:
+            self.scene.undo_stack.beginMacro("Flip Horizontal")
+        try:
+            for item in items:
+                item.flip_horizontal()
+        finally:
+            if multi:
+                self.scene.undo_stack.endMacro()
 
     def _flip_vertical(self) -> None:
         if self.scene is None:
@@ -874,8 +890,15 @@ class MainWindow(QMainWindow):
         items = [i for i in self.scene.selected_items() if hasattr(i, "flip_vertical")]
         if not items:
             return
-        for item in items:
-            item.flip_vertical()
+        multi = len(items) > 1
+        if multi:
+            self.scene.undo_stack.beginMacro("Flip Vertical")
+        try:
+            for item in items:
+                item.flip_vertical()
+        finally:
+            if multi:
+                self.scene.undo_stack.endMacro()
 
     def _magnify_selected(self) -> None:
         if self.scene is None:
@@ -883,8 +906,31 @@ class MainWindow(QMainWindow):
         items = [i for i in self.scene.selected_items() if hasattr(i, "magnify")]
         if not items:
             return
-        for item in items:
-            item.magnify()
+        multi = len(items) > 1
+        if multi:
+            self.scene.undo_stack.beginMacro("Magnify")
+        try:
+            for item in items:
+                item.magnify()
+        finally:
+            if multi:
+                self.scene.undo_stack.endMacro()
+
+    def _demagnify_selected(self) -> None:
+        if self.scene is None:
+            return
+        items = [i for i in self.scene.selected_items() if hasattr(i, "demagnify")]
+        if not items:
+            return
+        multi = len(items) > 1
+        if multi:
+            self.scene.undo_stack.beginMacro("Shrink")
+        try:
+            for item in items:
+                item.demagnify()
+        finally:
+            if multi:
+                self.scene.undo_stack.endMacro()
 
     def closeEvent(self, event) -> None:
         # Clean-shutdown marker (Phase 0.3): a normal exit removes the

@@ -209,9 +209,17 @@ class ReorderItemCommand(QUndoCommand):
 
 class SendToBackCommand(QUndoCommand):
     """Moves `item` to the very bottom (index 0) of its layer's stack.
-    `group` must expose move_item_to_bottom(item) and index_of(item).
-    Captures the old index on each redo (not just __init__) so an
-    interleaved reorder/restore cycle still restores correctly.
+    `group` must expose move_item_to_bottom(item), move_item_to_index(item,
+    index), and index_of(item). Captures the old index on each redo (not
+    just __init__) so an interleaved reorder/restore cycle still restores
+    correctly.
+
+    undo() uses move_item_to_index() rather than add_existing() — the
+    item was never removed from the bucket by move_item_to_bottom() (it
+    only repositions within the same bucket), so add_existing() either
+    duplicated it (buckets with no dedup guard) or silently no-opped
+    (buckets that guard against re-adding a present item) instead of
+    actually restoring its position.
     """
 
     def __init__(self, group, item):
@@ -226,12 +234,14 @@ class SendToBackCommand(QUndoCommand):
 
     def undo(self) -> None:
         if self._old_index is not None:
-            self._group.add_existing(self._item, self._old_index)
+            self._group.move_item_to_index(self._item, self._old_index)
 
 
 class BringToFrontCommand(QUndoCommand):
     """Moves `item` to the very top of its layer's stack. Same
-    capture-pattern as SendToBackCommand but targeting the end.
+    capture-pattern as SendToBackCommand but targeting the end — see its
+    docstring for why undo() uses move_item_to_index() instead of
+    add_existing().
     """
 
     def __init__(self, group, item):
@@ -246,7 +256,7 @@ class BringToFrontCommand(QUndoCommand):
 
     def undo(self) -> None:
         if self._old_index is not None:
-            self._group.add_existing(self._item, self._old_index)
+            self._group.move_item_to_index(self._item, self._old_index)
 
 
 class CopyItemCommand(QUndoCommand):

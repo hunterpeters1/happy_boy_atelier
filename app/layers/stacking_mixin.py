@@ -93,6 +93,27 @@ class StackedLayerMixin:
         self._reassign_z()
         return True
 
+    def move_item_to_index(self, item, index: int) -> bool:
+        """Move `item` to an arbitrary position within its bucket, clamped
+        to valid bounds. Used by SendToBackCommand/BringToFrontCommand's
+        undo() to restore an item to its exact pre-move index — unlike
+        add_existing(), which assumes the item was actually removed from
+        the bucket first (true for DeleteItemCommand's undo, false here:
+        move_item_to_top()/move_item_to_bottom() only reposition the item
+        within the same bucket, so routing their undo through
+        add_existing() either duplicated the item (no-dedup buckets) or
+        silently no-opped (dedup-guarded buckets) instead of repositioning
+        it. This method repositions directly instead.
+        """
+        bucket = self._bucket_for(item)
+        if bucket is None or item not in bucket:
+            return False
+        bucket.remove(item)
+        target = max(0, min(index, len(bucket)))
+        bucket.insert(target, item)
+        self._reassign_z()
+        return True
+
     def can_send_to_back(self, item) -> bool:
         """True if `item` can be moved to the bottom of its bucket."""
         bucket = self._bucket_for(item)

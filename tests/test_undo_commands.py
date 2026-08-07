@@ -20,11 +20,14 @@ from PySide6.QtGui import QPixmap
 
 from app.atelier_io import load_atelier, save_atelier
 from app.canvas.canvas_scene import CanvasScene
+from app.canvas.handle_frame import MIN_SCALE, MAX_SCALE
 from app.canvas.undo_commands import (
     AddItemCommand,
+    BringToFrontCommand,
     CropItemCommand,
     DeleteItemCommand,
     ReorderItemCommand,
+    SendToBackCommand,
     SetNoteTextCommand,
     SetPerspectiveModeCommand,
     SetPropertyCommand,
@@ -391,6 +394,140 @@ def test_reference_image_rotate_undo_redo(qapp):
 
     scene.undo_stack.redo()
     assert item.rotation() == 72
+
+
+def test_flip_horizontal_pushes_undoable_command(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(100, 100)
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    assert scene.undo_stack.isClean() is True
+
+    item.flip_horizontal()
+    assert item.scale_x() == -1.0
+    assert item.scale_y() == 1.0
+    assert scene.undo_stack.canUndo() is True
+    assert scene.undo_stack.isClean() is False  # must mark the project dirty
+
+    scene.undo_stack.undo()
+    assert item.scale_x() == 1.0
+    assert item.scale_y() == 1.0
+
+    scene.undo_stack.redo()
+    assert item.scale_x() == -1.0
+
+
+def test_flip_vertical_pushes_undoable_command(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(100, 100)
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+
+    item.flip_vertical()
+    assert item.scale_y() == -1.0
+    assert scene.undo_stack.canUndo() is True
+
+    scene.undo_stack.undo()
+    assert item.scale_y() == 1.0
+
+
+def test_magnify_demagnify_push_undoable_commands(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(100, 100)
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+
+    item.magnify()
+    assert item.scale_x() == 2.0
+    assert item.scale_y() == 2.0
+    assert scene.undo_stack.canUndo() is True
+
+    scene.undo_stack.undo()
+    assert item.scale_x() == 1.0
+    assert item.scale_y() == 1.0
+
+    item.demagnify()
+    assert item.scale_x() == 0.5
+    assert scene.undo_stack.canUndo() is True
+
+    scene.undo_stack.undo()
+    assert item.scale_x() == 1.0
+
+
+def test_magnify_preserves_flip_sign(qapp):
+    """Magnifying a flipped image must not flip the other axis too —
+    set_scale_factor() (the pre-fix implementation) forces both axes to
+    the same signed value, corrupting a flip on the untouched axis.
+    """
+    scene = _scene(qapp)
+    pixmap = QPixmap(100, 100)
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+
+    item.flip_horizontal()
+    assert item.scale_x() == -1.0
+    assert item.scale_y() == 1.0
+
+    item.magnify()
+    assert item.scale_x() == -2.0  # still flipped, magnitude doubled
+    assert item.scale_y() == 2.0   # NOT flipped — the regression this guards
+
+    scene.undo_stack.undo()  # undoes magnify only
+    assert item.scale_x() == -1.0
+    assert item.scale_y() == 1.0
+
+
+def test_magnify_respects_max_scale(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(100, 100)
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    item.set_scale_xy(MAX_SCALE - 10.0, MAX_SCALE - 10.0)
+
+    item.magnify()  # would exceed MAX_SCALE if unclamped
+    assert item.scale_x() == MAX_SCALE
+    assert item.scale_y() == MAX_SCALE
+
+
+def test_demagnify_respects_min_scale(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(100, 100)
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    item.set_scale_xy(MIN_SCALE + 0.01, MIN_SCALE + 0.01)
+
+    item.demagnify()  # would fall below MIN_SCALE if unclamped
+    assert item.scale_x() == MIN_SCALE
+    assert item.scale_y() == MIN_SCALE
+
+
+def test_multi_flip_horizontal_is_one_undo_step(qapp):
+    """MainWindow._flip_horizontal() wraps a multi-selection's per-item
+    flip_horizontal() calls in beginMacro()/endMacro(), matching
+    duplicate_selected_items()/send_to_back_selected()'s convention
+    (canvas/canvas_scene.py) — same mechanism verified directly here
+    against the scene/undo_stack, since this suite deliberately avoids
+    constructing a real MainWindow (see CLAUDE.md's QSettings/registry
+    isolation note for why).
+    """
+    scene = _scene(qapp)
+    pixmap = QPixmap(100, 100)
+    a = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    b = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    start_index = scene.undo_stack.index()
+
+    scene.undo_stack.beginMacro("Flip Horizontal")
+    try:
+        a.flip_horizontal()
+        b.flip_horizontal()
+    finally:
+        scene.undo_stack.endMacro()
+
+    assert scene.undo_stack.index() == start_index + 1  # one step, not two
+    assert a.scale_x() == -1.0
+    assert b.scale_x() == -1.0
+
+    scene.undo_stack.undo()
+    assert a.scale_x() == 1.0
+    assert b.scale_x() == 1.0
+
+    scene.undo_stack.redo()
+    assert a.scale_x() == -1.0
+    assert b.scale_x() == -1.0
 
 
 def test_reference_image_delete_undo_redo(qapp):
@@ -841,6 +978,88 @@ def test_lighting_layer_reorder_scoped_to_marker_type(qapp):
 
     assert layer.move_item_backward(s2) is True
     assert layer.sources == [s2, s1]
+
+
+# -- SendToBackCommand / BringToFrontCommand -----------------------------------------
+# Covers both failure modes a broken undo() could hit: ReferenceLayerGroup's
+# add_existing() has no dedup guard (pre-fix, undo duplicated the item),
+# while CompositionLayerGroup's does guard against a still-present item
+# (pre-fix, undo silently did nothing instead of restoring position) — a
+# fix that only covers one of these could still regress the other.
+
+def test_send_to_back_command_undo_redo(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(10, 10)
+    a = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    b = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    c = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    assert scene.reference_layer.items() == [a, b, c]
+
+    scene.undo_stack.push(SendToBackCommand(scene.reference_layer, c))
+    assert scene.reference_layer.items() == [c, a, b]
+
+    scene.undo_stack.undo()
+    assert scene.reference_layer.items() == [a, b, c]
+    assert len(scene.reference_layer.items()) == 3  # not duplicated
+
+    scene.undo_stack.redo()
+    assert scene.reference_layer.items() == [c, a, b]
+    assert len(scene.reference_layer.items()) == 3
+
+
+def test_send_to_back_command_undo_redo_composition_layer(qapp):
+    scene = _scene(qapp)
+    layer = scene.composition_layer
+    fa = layer.add_focal_point("primary", QPointF(0, 0))
+    fb = layer.add_focal_point("primary", QPointF(10, 10))
+    fc = layer.add_focal_point("primary", QPointF(20, 20))
+    assert layer.focal_points == [fa, fb, fc]
+
+    scene.undo_stack.push(SendToBackCommand(layer, fc))
+    assert layer.focal_points == [fc, fa, fb]
+
+    scene.undo_stack.undo()
+    assert layer.focal_points == [fa, fb, fc]  # actually restored, not a no-op
+
+    scene.undo_stack.redo()
+    assert layer.focal_points == [fc, fa, fb]
+
+
+def test_bring_to_front_command_undo_redo(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(10, 10)
+    a = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    b = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    c = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    assert scene.reference_layer.items() == [a, b, c]
+
+    scene.undo_stack.push(BringToFrontCommand(scene.reference_layer, a))
+    assert scene.reference_layer.items() == [b, c, a]
+
+    scene.undo_stack.undo()
+    assert scene.reference_layer.items() == [a, b, c]
+    assert len(scene.reference_layer.items()) == 3
+
+    scene.undo_stack.redo()
+    assert scene.reference_layer.items() == [b, c, a]
+    assert len(scene.reference_layer.items()) == 3
+
+
+def test_bring_to_front_command_undo_redo_composition_layer(qapp):
+    scene = _scene(qapp)
+    layer = scene.composition_layer
+    fa = layer.add_focal_point("primary", QPointF(0, 0))
+    fb = layer.add_focal_point("primary", QPointF(10, 10))
+    fc = layer.add_focal_point("primary", QPointF(20, 20))
+
+    scene.undo_stack.push(BringToFrontCommand(layer, fa))
+    assert layer.focal_points == [fb, fc, fa]
+
+    scene.undo_stack.undo()
+    assert layer.focal_points == [fa, fb, fc]
+
+    scene.undo_stack.redo()
+    assert layer.focal_points == [fb, fc, fa]
 
 
 # -- StackedLayerMixin.index_of() (layers/stacking_mixin.py) ------------------------
