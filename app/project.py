@@ -52,6 +52,10 @@ class ProjectMeta:
     created_at: str = field(default_factory=_now_iso)
     modified_at: str = field(default_factory=_now_iso)
     locked: bool = False
+    # Eyedropper-pinned colors, as "#RRGGBB" hex strings. Per-project (not
+    # QSettings()) and deliberately excluded from Undo/Redo, same as lock
+    # state above -- a mixing reference, not artwork content.
+    color_swatches: list[str] = field(default_factory=list)
 
     def touch(self) -> None:
         self.modified_at = _now_iso()
@@ -65,6 +69,7 @@ class ProjectMeta:
             created_at=d.get("created_at", _now_iso()),
             modified_at=d.get("modified_at", _now_iso()),
             locked=bool(d.get("locked", False)),
+            color_swatches=list(d.get("color_swatches", [])),
         )
 
 

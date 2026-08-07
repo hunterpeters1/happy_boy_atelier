@@ -62,6 +62,9 @@ _SHAPES: dict[str, str] = {
     # (prints closer to the top of its layer) / backward within its layer.
     "reorder_up": '<path d="M10 16V4"/><path d="M5 9l5-5 5 5"/>',
     "reorder_down": '<path d="M10 4v12"/><path d="M5 11l5 5 5-5"/>',
+    # Eyedropper: a diamond-bodied pipette (bulb top-right, tip bottom-left)
+    # with a band line near the tip and a small sampled-drop dot below it.
+    "eyedropper": '<path d="M14.5 2.5l3 3-9 9-4 1 1-4z"/><path d="M12 5l3 3"/><circle cx="4" cy="16" r="1"/>',
 }
 
 

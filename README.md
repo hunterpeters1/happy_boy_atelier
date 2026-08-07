@@ -119,6 +119,15 @@ Each imported photo is its own object:
   in exports by default**; the Export dialog has an explicit "Include
   Study Blur effect" checkbox if you want it baked into a specific
   export.
+- **Eyedropper** — tool button in the Project Panel's Reference section
+  (not the toolbar). Arm it, then hover any reference image: a
+  **Swatches** dock (tabbed with Properties) shows a live readout of the
+  color under the cursor — hex, RGB, and a value/luminance percentage for
+  judging value relationships while mixing paint. Click to pin that color
+  into a per-project swatch list (not shared between projects); each
+  pinned swatch has its own remove button. The tool stays armed for
+  repeated sampling — Esc, re-clicking the button, or arming a different
+  tool exits it.
 
 ### Composition tools
 
@@ -170,9 +179,14 @@ Also placed via tool buttons in the **Project Panel's Lighting section**:
 
 ### Guides
 
-Project Panel's **Guides** section has two checkboxes — **Rule of
-Thirds** and **Golden Ratio** overlays. Purely visual, always drawn on
-top, nothing to place or select.
+Project Panel's **Guides** section has three checkboxes — **Rule of
+Thirds**, **Golden Ratio**, and **1" Grid** overlays. Purely visual,
+always drawn on top, nothing to place or select. The grid is spaced using
+the canvas's real physical scale (the same one the rulers use), for the
+classic grid-method technique of transferring a composition to a
+physical canvas — and since it's a normal layer like the other guides, it
+shows up in PNG/JPG/PDF exports automatically, no separate export step
+needed.
 
 ### Selecting, organizing, and editing
 

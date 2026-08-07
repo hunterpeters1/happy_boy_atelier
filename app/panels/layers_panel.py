@@ -477,6 +477,10 @@ class LayersPanel(QWidget):
         self._set_row_widget(row, 0, widget)
         self._span_full_width(row)
 
+        self._add_tool_row(parent, [
+            ("eyedropper", "eyedropper", "Sample a color from a reference image"),
+        ])
+
         # Reversed: the layer group's own list is back-to-front (index 0 =
         # bottom of the stack), but the row order here should read
         # top-of-panel = top-of-stack, matching every other layered-editor
@@ -649,6 +653,7 @@ class LayersPanel(QWidget):
         layer = self.scene.guides_layer
         self._add_toggle_row(parent, "Rule of Thirds", layer.thirds.isVisible(), layer.set_rule_of_thirds)
         self._add_toggle_row(parent, "Golden Ratio", layer.golden.isVisible(), layer.set_golden_ratio)
+        self._add_toggle_row(parent, "1\" Grid", layer.grid.isVisible(), layer.set_inch_grid)
 
     # -- selection sync (canvas <-> tree) ------------------------------------
     def _on_tree_selection_changed(self) -> None:

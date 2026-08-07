@@ -43,6 +43,7 @@ from .dialogs.new_project_dialog import NewProjectDialog
 from .dialogs.start_screen import StartScreen
 from .panels.layers_panel import LayersPanel
 from .panels.properties_panel import PropertiesPanel
+from .panels.swatches_panel import SwatchesPanel
 from .project import CanvasSpec, ProjectMeta
 
 MAX_RECENT_FILES = 10
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow):
         self.view: CanvasView | None = None
         self.layers_dock: QDockWidget | None = None
         self.properties_dock: QDockWidget | None = None
+        self.swatches_dock: QDockWidget | None = None
 
         # Appearance (see themes.py) — caller (main.py) already applied
         # this mode's palette to constants.py and ran apply_theme() before
@@ -212,6 +214,8 @@ class MainWindow(QMainWindow):
             self.removeDockWidget(self.layers_dock)
         if self.properties_dock is not None:
             self.removeDockWidget(self.properties_dock)
+        if self.swatches_dock is not None:
+            self.removeDockWidget(self.swatches_dock)
 
         self.layers_panel = LayersPanel(scene, self)
         self.layers_panel.request_import.connect(self.import_images)
@@ -231,6 +235,18 @@ class MainWindow(QMainWindow):
         self.properties_dock.setWidget(self.properties_panel)
         self.properties_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
         self.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
+
+        # Eyedropper output — per-project swatch list (see meta.color_swatches),
+        # rebuilt alongside Properties so a fresh self.meta (just assigned by
+        # the new-project/open-project caller above) is what it reads from.
+        # SwatchesPanel wires scene.color_hovered/color_sampled to itself
+        # in its own __init__ — nothing further to connect here.
+        self.swatches_panel = SwatchesPanel(scene, self.meta, self)
+        self.swatches_dock = QDockWidget("Swatches", self)
+        self.swatches_dock.setWidget(self.swatches_panel)
+        self.swatches_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.swatches_dock)
+        self.tabifyDockWidget(self.properties_dock, self.swatches_dock)
 
         # The Inspector has exactly one source of truth: CanvasScene's own
         # selection_changed signal (see canvas_scene.py — Qt's native

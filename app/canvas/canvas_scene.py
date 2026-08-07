@@ -13,7 +13,7 @@ from .. import constants as C
 from ..constants import LayerKind
 from ..project import CanvasSpec
 from .interactive_item import InteractiveItem
-from ..layers.reference_layer import ReferenceLayerGroup
+from ..layers.reference_layer import ReferenceImageItem, ReferenceLayerGroup
 from ..layers.composition_layer import CompositionLayerGroup, FocalPointItem, MovementLineItem, NoteItem
 from ..layers.perspective_layer import PerspectiveLayerGroup
 from ..layers.lighting_layer import LightingLayerGroup, LightSourceItem, DirectionArrowItem
@@ -35,6 +35,12 @@ class CanvasScene(QGraphicsScene):
     # driving the resize/rotate handle frame's notion of "primary" item.
     # A multi-select still has exactly one of these (the last one clicked).
     item_activated = Signal(object)
+    # Eyedropper tool: color_hovered fires continuously while it's armed
+    # and the cursor is over a reference image (carries None otherwise, so
+    # listeners can clear a live readout); color_sampled fires once per
+    # click, for pinning to a persistent swatch list. See _sample_color_at.
+    color_hovered = Signal(object)
+    color_sampled = Signal(QColor)
 
     def __init__(self, canvas_spec: CanvasSpec):
         super().__init__()
@@ -215,7 +221,31 @@ class CanvasScene(QGraphicsScene):
     def mouseMoveEvent(self, event) -> None:
         if self._pending_point is not None and self._active_tool in _TWO_CLICK_TOOLS:
             self._update_preview_line(event.scenePos())
+        elif self._active_tool == "eyedropper":
+            self.color_hovered.emit(self._sample_color_at(event.scenePos()))
         super().mouseMoveEvent(event)
+
+    def _sample_color_at(self, pos) -> QColor | None:
+        """Topmost reference image under a scene position, sampled at that
+        point -- used by both the eyedropper's live hover readout and its
+        click-to-pin action. Mirrors interactive_item_at()'s topmost-under-
+        cursor scan, but skips non-reference candidates (a composition
+        marker or light source sitting on top by z-order shouldn't block
+        sampling through it) instead of stopping at the first
+        InteractiveItem.
+        """
+        views = self.views()
+        transform = views[0].transform() if views else QTransform()
+        for candidate in self.items(pos, Qt.IntersectsItemShape, Qt.DescendingOrder, transform):
+            node = candidate
+            while node is not None and not isinstance(node, ReferenceImageItem):
+                node = node.parentItem()
+            if node is not None:
+                px = node.sample_source_pixel(pos)
+                if px is not None:
+                    return node.pixel_color(px.x(), px.y())
+                return None
+        return None
 
     def active_tool(self) -> str | None:
         return self._active_tool
@@ -330,6 +360,17 @@ class CanvasScene(QGraphicsScene):
 
     def _handle_tool_click(self, pos) -> bool:
         tool = self._active_tool
+        if tool == "eyedropper":
+            # Doesn't create a persisted item (no _add()/AddItemCommand)
+            # and deliberately doesn't call set_active_tool(None) below --
+            # stays armed for repeated sampling, unlike every other tool
+            # here, until the user explicitly exits it (Esc, re-click the
+            # toolbar button, or arms a different tool).
+            color = self._sample_color_at(pos)
+            if color is not None:
+                self.color_sampled.emit(color)
+            return True
+
         if tool in _SINGLE_CLICK_TOOLS:
             if tool == "focal_primary":
                 item = FocalPointItem("primary")

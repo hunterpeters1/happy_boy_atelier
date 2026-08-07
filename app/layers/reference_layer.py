@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 import uuid
 
-from PySide6.QtCore import QBuffer, QIODevice, QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QBuffer, QIODevice, QPoint, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import (
     QApplication,
@@ -120,6 +120,11 @@ class ReferenceImageItem(InteractiveItem):
         self.original_format = original_format
         self.original_file_size = original_file_size
         self._source_pixmap = source_pixmap
+        # Lazily-built QImage view of _source_pixmap, cached for the
+        # eyedropper's pixel_color() -- sampling fires continuously on
+        # hover, and _source_pixmap is set once here and never reassigned,
+        # so this cache never needs invalidating.
+        self._source_image = None
         self._base_w = base_w
         self._base_h = base_h
         self._crop = crop or QRect(0, 0, source_pixmap.width(), source_pixmap.height())
@@ -565,6 +570,42 @@ class ReferenceImageItem(InteractiveItem):
         self._crop_preview = r.normalized()
         self._reposition_crop_handles()
         self.update()
+
+    # -- eyedropper -----------------------------------------------------
+    def sample_source_pixel(self, scene_pos: QPointF) -> QPoint | None:
+        """Map a scene-space point to a pixel coordinate in the full-
+        resolution source image, for the eyedropper tool. Same local-
+        coords -> fraction -> source-pixel transform apply_crop() uses on
+        a rect below, generalized to a single point. Returns None if the
+        point falls outside the actual image (e.g. a click near the
+        padded handle-frame bounds that apply_crop()'s rect never has to
+        handle).
+        """
+        local = self.mapFromScene(scene_pos)
+        full_w, full_h = self.natural_size()
+        if full_w <= 0 or full_h <= 0:
+            return None
+        frac_x = (local.x() + full_w / 2) / full_w
+        frac_y = (local.y() + full_h / 2) / full_h
+        if not (0.0 <= frac_x <= 1.0 and 0.0 <= frac_y <= 1.0):
+            return None
+        px = self._crop.x() + frac_x * self._crop.width()
+        py = self._crop.y() + frac_y * self._crop.height()
+        px_i, py_i = int(round(px)), int(round(py))
+        if not (0 <= px_i < self._source_pixmap.width() and 0 <= py_i < self._source_pixmap.height()):
+            return None
+        return QPoint(px_i, py_i)
+
+    def pixel_color(self, px: int, py: int) -> QColor:
+        """RGB color at a source-pixel coordinate (see
+        sample_source_pixel()). Caches the QImage conversion since this is
+        called continuously while the eyedropper hovers -- reconverting
+        the whole pixmap every mouse-move tick would be the same per-frame
+        cost problem _get_display_pixmap() above exists to avoid.
+        """
+        if self._source_image is None:
+            self._source_image = self._source_pixmap.toImage()
+        return self._source_image.pixelColor(px, py)
 
     def set_crop(self, rect: QRect) -> None:
         """Apply a crop QRect directly (source-pixel coordinates). Used both
