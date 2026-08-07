@@ -209,22 +209,124 @@ def test_crop_item_command_undo_redo(qapp):
     assert QRect(*item.to_dict()["crop"]) == new_crop
 
 
-def test_apply_crop_pushes_one_command_not_per_handle_drag(qapp):
+def test_crop_drag_pushes_one_command_not_per_frame(qapp):
+    """Crop is direct manipulation via edge handles — dragging an edge
+    modifies _crop live (no undo command per frame), and only on release
+    is a single CropItemCommand pushed. Mirrors how resize/rotate work:
+    begin_transform captures the baseline, commit pushes one command.
+    """
     scene = _scene(qapp)
     pixmap = QPixmap(100, 100)
     item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
     start_index = scene.undo_stack.index()
 
-    item.enter_crop_mode()
-    # Simulate several handle-drag frames narrowing the preview rect —
-    # none of these should touch the undo stack; only Apply Crop does.
-    item.update_crop_corner("br", QPointF(-50, -50))
-    item.update_crop_corner("br", QPointF(-20, -20))
+    # Simulate the start of a crop-edge drag (right edge).
+    item._begin_crop_drag("right")
+    old_crop = QRect(item._crop)
+    # Simulate several drag frames moving the right edge inward —
+    # none of these should touch the undo stack.
+    item._update_crop_drag(_FakeMouseEvent(QPointF(-25, 0)))
+    item._update_crop_drag(_FakeMouseEvent(QPointF(-10, 0)))
     assert scene.undo_stack.index() == start_index
+    # The crop has changed immediately (direct manipulation).
+    assert QRect(item._crop) != old_crop
 
-    item.apply_crop()
+    item._commit_crop()
     assert scene.undo_stack.index() == start_index + 1
-    assert not item.is_cropping()
+
+    # Undo restores the original crop.
+    scene.undo_stack.undo()
+    assert QRect(*item.to_dict()["crop"]) == old_crop
+    # Redo re-applies the new crop.
+    scene.undo_stack.redo()
+    assert QRect(*item.to_dict()["crop"]) != old_crop
+
+
+class _FakeMouseEvent:
+    """Minimal stand-in for QGraphicsSceneMouseEvent so crop-drag update
+    can be tested without a real mouse. Only scenePos() is used by
+    _update_crop_drag.
+    """
+    def __init__(self, scene_pos: QPointF):
+        self._scene_pos = scene_pos
+
+    def scenePos(self) -> QPointF:
+        return self._scene_pos
+
+
+def test_reset_crop_via_command(qapp):
+    """Reset Crop button / reset_crop() pushes a CropItemCommand that
+    clears the crop back to full source. Undo/redo works."""
+    scene = _scene(qapp)
+    pixmap = QPixmap(100, 100)
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    # Apply a crop directly.
+    item.set_crop(QRect(20, 20, 40, 40))
+    assert QRect(*item.to_dict()["crop"]) == QRect(20, 20, 40, 40)
+    start_index = scene.undo_stack.index()
+
+    # reset_crop pushes a command.
+    item.reset_crop()
+    assert scene.undo_stack.index() == start_index + 1
+    assert QRect(*item.to_dict()["crop"]) == QRect(0, 0, 100, 100)
+
+    # Undo re-applies the crop.
+    scene.undo_stack.undo()
+    assert QRect(*item.to_dict()["crop"]) == QRect(20, 20, 40, 40)
+
+    # Redo clears it again.
+    scene.undo_stack.redo()
+    assert QRect(*item.to_dict()["crop"]) == QRect(0, 0, 100, 100)
+
+
+def test_crop_does_not_interfere_with_resize(qapp):
+    """After cropping, the image's natural_size() reflects the cropped
+    dimensions so resize handles track the visible (cropped) footprint
+    correctly."""
+    scene = _scene(qapp)
+    pixmap = QPixmap(100, 100)
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    # Full image: natural_size is (275, 275) (fit_base_size with 500x500
+    # canvas -> target=275, pixmap is square so both axes = 275).
+    assert item.natural_size() == (275.0, 275.0)
+
+    # Crop to half-width on the right: frac_w = 50/100 = 0.5.
+    item.set_crop(QRect(0, 0, 50, 100))
+    w, h = item.natural_size()
+    assert w == 137.5  # 275 * (50 / 100)
+    assert h == 275.0  # unchanged (frac_h = 100/100)
+
+    # Resize after crop — set_scale_xy should still work (it changes the
+    # item's transform, not natural_size). Just verify it doesn't raise.
+    item.set_scale_xy(2.0, 2.0)
+    assert item.scale_x() == 2.0
+    assert item.scale_y() == 2.0
+
+
+def test_crop_edge_handles_hidden_when_crop_is_full(qapp):
+    """Edge handles are only visible when there's an active (non-full)
+    crop — they shouldn't clutter the canvas when the image is uncropped."""
+    scene = _scene(qapp)
+    pixmap = QPixmap(100, 100)
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+
+    # No crop = edge handles hidden.
+    item.set_ui_active(True)
+    assert item._crop_is_full() is True
+    # Edge handles exist but are not visible.
+    edge_visible = all(h.isVisible() for h in item._handles._edges)
+    assert not edge_visible
+
+    # Apply a crop — edge handles become visible.
+    item.set_crop(QRect(10, 10, 50, 50))
+    assert item._crop_is_full() is False
+    edge_visible = all(h.isVisible() for h in item._handles._edges)
+    assert edge_visible
+
+    # Reset crop — edge handles hidden again.
+    item.reset_crop()
+    edge_visible = all(h.isVisible() for h in item._handles._edges)
+    assert not edge_visible
 
 
 # -- Validation pass (per Hunter's Phase 0 undo-reliability checklist) ------------

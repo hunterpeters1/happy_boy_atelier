@@ -15,6 +15,14 @@ Corner-drag resize (free by default, Shift locks proportions) is anchored
 at the corner opposite the one being dragged — see canvas/resize_math.py
 for the geometry and why it has to be resolved in the item's own rotated
 axes rather than screen axes.
+
+Edge handles (left/right/top/bottom midpoints) are for direct crop
+manipulation on ReferenceImageItem — dragging an edge handle pushes that
+edge inward to crop the image. Like the corner and rotate handles, they
+are purely decorative (setAcceptedMouseButtons(NoButton)) — the actual
+hit-testing and drag handling lives in ReferenceImageItem itself, for the
+same Qt-child-over-transformed-parent click-delivery reason (see
+_CornerScaleHandle docstring below).
 """
 
 from __future__ import annotations
@@ -28,6 +36,11 @@ from .. import constants as C
 HANDLE_PX = 9
 MIN_SCALE = 0.05
 MAX_SCALE = 40.0
+# Edge handles for crop are slightly larger than corner handles for a more
+# forgiving grab — the same reasoning as HANDLE_HIT_RADIUS_PX widening in
+# reference_layer.py, applied here for the new crop interaction.
+EDGE_HANDLE_PX = 12
+CROP_HANDLE_COLOR = C.COLOR_FOCAL_PRIMARY
 
 
 class _CornerScaleHandle(QGraphicsRectItem):
@@ -82,6 +95,38 @@ class _RotateHandle(QGraphicsRectItem):
         self.setPos(0, -h / 2 - offset)
 
 
+class _EdgeHandle(QGraphicsRectItem):
+    """Purely decorative edge-midpoint handle for crop manipulation. Like
+    _CornerScaleHandle, the actual mouse interaction is handled by the
+    target item's own event handlers (same Qt limitation — see
+    _CornerScaleHandle docstring). These exist only to render the visual
+    grab affordance at the correct screen size regardless of zoom/rotation.
+
+    `edge` is one of "left", "right", "top", "bottom".
+    """
+
+    def __init__(self, target, edge: str):
+        super().__init__(-EDGE_HANDLE_PX / 2, -EDGE_HANDLE_PX / 2, EDGE_HANDLE_PX, EDGE_HANDLE_PX, target)
+        self._target = target
+        self._edge = edge
+        self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        self.setBrush(QBrush(QColor(CROP_HANDLE_COLOR)))
+        self.setPen(QPen(QColor(C.COLOR_BG_DARKEST), 1))
+        self.setZValue(1000)
+        self.setAcceptedMouseButtons(Qt.NoButton)
+
+    def reposition(self) -> None:
+        w, h = self._target.natural_size()
+        if self._edge == "left":
+            self.setPos(-w / 2, 0)
+        elif self._edge == "right":
+            self.setPos(w / 2, 0)
+        elif self._edge == "top":
+            self.setPos(0, -h / 2)
+        elif self._edge == "bottom":
+            self.setPos(0, h / 2)
+
+
 class HandleFrame:
     """Owns the set of handle children for a target item and manages their
     visibility/position. Not a QGraphicsItem itself — just a small manager
@@ -97,12 +142,19 @@ class HandleFrame:
             _CornerScaleHandle(target, 1, 1),
         ]
         self._rotate = _RotateHandle(target)
+        # Edge handles for crop — created once, shown/hidden as needed.
+        # Always created (not lazily) so they're ready the moment an image
+        # with a crop is selected, with no allocation jitter on first use.
+        self._edges = [_EdgeHandle(target, e) for e in ("left", "right", "top", "bottom")]
         self.set_active(False)
+        self.set_crop_handles_visible(False)
 
     def reposition(self) -> None:
         for h in self._corners:
             h.reposition()
         self._rotate.reposition()
+        for h in self._edges:
+            h.reposition()
 
     def set_active(self, active: bool) -> None:
         for h in self._corners:
@@ -110,3 +162,12 @@ class HandleFrame:
         self._rotate.setVisible(active)
         if active:
             self.reposition()
+
+    def set_crop_handles_visible(self, visible: bool) -> None:
+        """Show/hide the edge (crop) handles independently from the
+        corner/rotate handles. Called by ReferenceImageItem when the image
+        has an active crop and is selected — crop handles only appear when
+        there's actually a crop to adjust.
+        """
+        for h in self._edges:
+            h.setVisible(visible)

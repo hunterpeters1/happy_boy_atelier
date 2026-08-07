@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+This project has more than one agent working on it — see `TEAM_ROLES.md`
+for the vision statement, top-level architecture rules, and current
+agent roles (Claude: architecture, Hermes: implementation). This file
+(`CLAUDE.md`) is the detailed engineering reference `TEAM_ROLES.md`
+points back to; it's loaded automatically for Claude Code sessions, but
+not for other agents, so don't assume its contents are already known.
+
 Read `README.md` before starting any task — it documents the full
 user-facing feature scope, including features that exist in the code but
 aren't obviously discoverable from the UI alone. Don't propose or plan a

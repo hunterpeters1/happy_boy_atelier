@@ -334,18 +334,14 @@ class CanvasScene(QGraphicsScene):
 
     def keyPressEvent(self, event) -> None:
         # Escape always backs out exactly one level: cancel an armed
-        # placement tool, then exit crop mode (previously Escape did
-        # nothing here — the only way out of crop was the Properties
-        # panel's Apply/Cancel buttons), then clear the selection.
+        # placement tool, then clear the selection. Crop is now direct
+        # manipulation via edge handles (commit on release) — there's no
+        # crop mode to escape from, so Escape just clears selection as
+        # normal.
         if event.key() == Qt.Key_Escape:
             if self._active_tool:
                 self.set_active_tool(None)
                 self.tool_finished.emit()
-                event.accept()
-                return
-            item = self._active_ui_item
-            if item is not None and hasattr(item, "is_cropping") and item.is_cropping():
-                item.cancel_crop()
                 event.accept()
                 return
             if self._selected_items:

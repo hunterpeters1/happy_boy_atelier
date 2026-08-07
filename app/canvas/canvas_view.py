@@ -200,11 +200,9 @@ class CanvasView(QGraphicsView):
                     icons.icon("unlock" if locked else "lock"), "Unlock" if locked else "Lock"
                 )
                 lock_action.triggered.connect(lambda: item.set_locked(not locked))
-            if hasattr(item, "enter_crop_mode"):
-                menu.addSeparator()
-                crop_action = menu.addAction(icons.icon("shapes"), "Crop…")
-                crop_action.setEnabled(not locked)
-                crop_action.triggered.connect(item.enter_crop_mode)
+            # Crop is direct manipulation via edge handles on the canvas —
+            # no context menu entry needed (the artist just grabs an edge
+            # handle when the image has a crop applied).
         else:
             fit_action = menu.addAction(icons.icon("fit"), "Fit Canvas")
             fit_action.triggered.connect(lambda: self.fit_canvas(scene.canvas_rect()))

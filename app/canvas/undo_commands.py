@@ -102,8 +102,8 @@ class TransformCommand(QUndoCommand):
 
 
 class CropItemCommand(QUndoCommand):
-    """Old/new crop QRect for a ReferenceImageItem, pushed at Apply Crop —
-    not on every crop-handle drag.
+    """Old/new crop QRect for a ReferenceImageItem, pushed once per edge-drag
+    release (commit-on-release) — not on every drag frame.
     """
 
     def __init__(self, item, old_crop, new_crop, label: str = "Crop image"):

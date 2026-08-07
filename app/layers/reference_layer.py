@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QGraphicsItem,
     QGraphicsItemGroup,
-    QGraphicsRectItem,
 )
 
 from .. import constants as C
@@ -23,9 +22,6 @@ from ..canvas.interactive_item import InteractiveItem
 from ..canvas.resize_math import compute_corner_resize
 from .stacking_mixin import StackedLayerMixin
 
-# Was 10 — bumped for a more forgiving grab, same reasoning as
-# HANDLE_HIT_RADIUS_PX below.
-CROP_HANDLE_PX = 14
 ROTATION_SNAP_DEG = 15.0
 # Screen-pixel tolerance for position snapping — converted to scene units
 # per-drag via the current view zoom, so the catch radius feels the same
@@ -41,6 +37,8 @@ SNAP_TOLERANCE_PX = 8.0
 # ItemIgnoresTransformations children over a transformed parent. The
 # squares in handle_frame.py are now purely decorative (NoButton).
 HANDLE_HIT_RADIUS_PX = HANDLE_PX / 2 + 10
+# Edge handles for crop extend a bit further for a more forgiving grab.
+EDGE_HANDLE_HIT_RADIUS_PX = HANDLE_PX / 2 + 12
 # Fixed scene-unit pad added to boundingRect() around the corner handles
 # while active (see boundingRect() below) so Qt still delivers the mouse
 # press to this item when a click lands just outside the exact image
@@ -51,6 +49,10 @@ HANDLE_HIT_RADIUS_PX = HANDLE_PX / 2 + 10
 # flat scene-unit value rather than a pixel-exact one — the precise
 # click tolerance is still enforced by _hit_test_handle() below.
 HANDLE_CLICK_MARGIN_SCENE = 30.0
+# Minimum cropped dimension in source pixels — prevents a degenerate
+# zero-width/height crop rect that would break the display-pixmap cache
+# and Study Blur numpy pipeline.
+MIN_CROP_PX = 4
 # Longest-edge cap (px) for the interactive display proxy — see
 # ReferenceImageItem._get_display_pixmap(). 2000px comfortably exceeds
 # typical on-screen display size even at high zoom on a 4K monitor, while
@@ -64,41 +66,6 @@ MAX_DISPLAY_DIM = 2000
 # the reduced resolution isn't a visible quality loss for a blur effect
 # specifically, which has no fine detail left to lose.
 BLUR_WORKING_DIM = 900
-
-
-# tl/br share a diagonal, tr/bl share the other — same convention as
-# ReferenceImageItem.hoverMoveEvent()'s corner-resize cursors.
-_CROP_CORNER_CURSORS = {
-    "tl": Qt.SizeFDiagCursor, "br": Qt.SizeFDiagCursor,
-    "tr": Qt.SizeBDiagCursor, "bl": Qt.SizeBDiagCursor,
-}
-
-
-class _CropHandle(QGraphicsRectItem):
-    """Free (non-aspect-locked) corner handle used only while a reference
-    item is in crop-editing mode.
-    """
-
-    def __init__(self, item: "ReferenceImageItem", corner: str):
-        super().__init__(-CROP_HANDLE_PX / 2, -CROP_HANDLE_PX / 2, CROP_HANDLE_PX, CROP_HANDLE_PX, item)
-        self._item = item
-        self._corner = corner  # "tl","tr","bl","br"
-        self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
-        self.setBrush(QBrush(QColor(C.COLOR_FOCAL_PRIMARY)))
-        self.setPen(QPen(QColor(C.COLOR_BG_DARKEST), 1))
-        self.setZValue(1001)
-        self.setAcceptedMouseButtons(Qt.LeftButton)
-        # Previously unset entirely — the smallest, least-forgiving
-        # handle in the app had zero hover cue at all.
-        self.setCursor(_CROP_CORNER_CURSORS[corner])
-
-    def mouseMoveEvent(self, event):
-        local = self._item.mapFromScene(event.scenePos())
-        self._item.update_crop_corner(self._corner, local)
-        event.accept()
-
-    def mouseReleaseEvent(self, event):
-        event.accept()
 
 
 class ReferenceImageItem(InteractiveItem):
@@ -130,9 +97,13 @@ class ReferenceImageItem(InteractiveItem):
         self._crop = crop or QRect(0, 0, source_pixmap.width(), source_pixmap.height())
         self._scale_x = 1.0
         self._scale_y = 1.0
-        self._crop_mode = False
-        self._crop_preview = QRectF()
-        self._crop_handles: list[_CropHandle] = []
+        # Crop-edge drag state — mirrors the handle-drag pattern in
+        # interactive_item.py / reference_layer.py _begin_handle_drag.
+        # When a crop edge drag is active, _crop_drag_edge is the edge
+        # being dragged ("left"/"right"/"top"/"bottom"),
+        # _crop_drag_press_crop is the QRect captured at press time.
+        self._crop_drag_edge: str | None = None
+        self._crop_drag_press_crop: QRect | None = None
         # Drives the on-canvas highlight border + resize/rotate handles.
         # Deliberately NOT Qt's own isSelected(): confirmed via runtime
         # logging that setSelected(True) does not reliably stick on items
@@ -305,7 +276,7 @@ class ReferenceImageItem(InteractiveItem):
         # selection randomly dropping/"jumping". paint() must keep using
         # _image_rect(), not this, or the pixmap would stretch to fill it.
         rect = self._image_rect()
-        if self._ui_active and not self._locked and not self._crop_mode:
+        if self._ui_active and not self._locked and not self._crop_drag_edge:
             _, h = self.natural_size()
             top_margin = max(20.0, h * 0.18) + HANDLE_CLICK_MARGIN_SCENE
             side_margin = HANDLE_CLICK_MARGIN_SCENE
@@ -391,7 +362,7 @@ class ReferenceImageItem(InteractiveItem):
     _CORNER_SIGNS = (("tl", -1, -1), ("tr", 1, -1), ("bl", -1, 1), ("br", 1, 1))
 
     def _hit_test_handle(self, scene_pos: QPointF) -> str | None:
-        if not self._ui_active or self._locked or self._crop_mode:
+        if not self._ui_active or self._locked or self._crop_drag_edge:
             return None
         view = self._view()
         if view is None:
@@ -468,6 +439,13 @@ class ReferenceImageItem(InteractiveItem):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
+            # Check edge handles (crop) first — they take priority over
+            # the body drag when visible.
+            edge = self._edge_for_hit_test(event.scenePos())
+            if edge is not None:
+                self._begin_crop_drag(edge)
+                event.accept()
+                return
             hit = self._hit_test_handle(event.scenePos())
             if hit is not None:
                 self._begin_handle_drag(hit, event.scenePos())
@@ -477,6 +455,10 @@ class ReferenceImageItem(InteractiveItem):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        if self._crop_drag_edge is not None:
+            self._update_crop_drag(event)
+            event.accept()
+            return
         if self._active_handle is not None:
             self._update_handle_drag(event)
             event.accept()
@@ -484,6 +466,10 @@ class ReferenceImageItem(InteractiveItem):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
+        if self._crop_drag_edge is not None:
+            self._commit_crop()
+            event.accept()
+            return
         if self._active_handle is not None:
             self._active_handle = None
             self.commit_transform()
@@ -495,9 +481,25 @@ class ReferenceImageItem(InteractiveItem):
     def hoverMoveEvent(self, event) -> None:
         # Nothing else gives a visual cue that a corner/rotate handle is
         # actually grabbable right where the cursor is — this is that
-        # cue. Reuses the exact same _hit_test_handle() the mouse press
-        # itself uses, so the cursor never claims a spot is grabbable
-        # that a click there wouldn't actually hit, or vice versa.
+        # cue. Reuses the exact same _edge_for_hit_test() and
+        # _hit_test_handle() that the mouse press itself uses, so the
+        # cursor never claims a spot is grabbable that a click there
+        # wouldn't actually hit, or vice versa.
+        if self._crop_drag_edge is not None:
+            # During a crop drag, keep the resize cursor for feedback.
+            self.setCursor(Qt.SizeAllCursor)
+            super().hoverMoveEvent(event)
+            return
+        edge = self._edge_for_hit_test(event.scenePos())
+        if edge is not None:
+            # Vertical edges get left/right cursor; horizontal edges get
+            # up/down cursor — standard crop-handle convention.
+            if edge in ("left", "right"):
+                self.setCursor(Qt.SizeHorCursor)
+            else:
+                self.setCursor(Qt.SizeVerCursor)
+            super().hoverMoveEvent(event)
+            return
         hit = self._hit_test_handle(event.scenePos())
         if hit is None:
             self.setCursor(Qt.ArrowCursor if self._locked else Qt.OpenHandCursor)
@@ -525,60 +527,177 @@ class ReferenceImageItem(InteractiveItem):
         self.prepareGeometryChange()
         self._ui_active = active
         self._handles.set_active(active and not self._locked)
+        # Crop edge handles are visible only when this image has an active
+        # crop (i.e. crop != full source). They appear alongside the
+        # resize/rotate handles — no separate crop mode to enter/exit.
+        self._handles.set_crop_handles_visible(active and not self._locked and not self._crop_is_full())
         self.update()
 
     def _on_locked_changed(self, locked: bool) -> None:
         self.prepareGeometryChange()
         self._handles.set_active(self._ui_active and not locked)
+        self._handles.set_crop_handles_visible(self._ui_active and not locked and not self._crop_is_full())
         self.setCursor(Qt.ArrowCursor if locked else Qt.OpenHandCursor)
 
     # -- crop -----------------------------------------------------------
-    def enter_crop_mode(self) -> None:
-        if self._locked:
+    # Crop is direct manipulation via the edge handles from HandleFrame.
+    # There is no separate "crop mode" — when a reference image is
+    # selected and has a crop applied, four edge handles (left/right/top/
+    # bottom) appear alongside the resize/rotate handles. Dragging one
+    # pushes that edge inward, immediately applying the crop. Undo/redo
+    # captures one CropItemCommand per drag (committed on release), via
+    # the same begin_transform()/commit_transform() pattern as move/resize.
+    def _crop_is_full(self) -> bool:
+        """True if _crop covers the entire source pixmap (no crop applied)."""
+        return (
+            self._crop.x() == 0
+            and self._crop.y() == 0
+            and self._crop.width() == self._source_pixmap.width()
+            and self._crop.height() == self._source_pixmap.height()
+        )
+
+    def reset_crop(self) -> None:
+        """Clear the crop back to the full source image. Pushes a
+        CropItemCommand onto the undo stack for undo/redo support.
+        Called from the Properties panel's "Reset Crop" button.
+        """
+        full = QRect(0, 0, self._source_pixmap.width(), self._source_pixmap.height())
+        if self._crop == full:
             return
-        self.prepareGeometryChange()
-        self._crop_mode = True
+        old_crop = QRect(self._crop)
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "undo_stack"):
+            from ..canvas.undo_commands import CropItemCommand
+            scene.undo_stack.push(CropItemCommand(self, old_crop, full, "Reset crop"))
+        else:
+            self.set_crop(full)
+
+    def _edge_for_hit_test(self, scene_pos: QPointF) -> str | None:
+        """Manual hit-test for the four crop edge handles (left/right/top/
+        bottom), mirroring the pattern already used for corner/rotate
+        handles in _hit_test_handle(). Returns None if no edge handle is
+        near the click.
+
+        Edge handles are positioned at the midpoints of the image's natural
+        (cropped) bounds — left at x=-w/2, right at x=+w/2, top at y=-h/2,
+        bottom at y=+h/2 (where w,h = natural_size(), which already
+        accounts for the current crop).
+        """
+        if not self._ui_active or self._locked or self._crop_is_full():
+            return None
+        view = self._view()
+        if view is None:
+            return None
+        click_vp = view.mapFromScene(scene_pos)
         w, h = self.natural_size()
-        self._crop_preview = QRectF(-w / 2, -h / 2, w, h)
-        self._handles.set_active(False)
-        if not self._crop_handles:
-            self._crop_handles = [_CropHandle(self, c) for c in ("tl", "tr", "bl", "br")]
-        for handle in self._crop_handles:
-            handle.setVisible(True)
-        self._reposition_crop_handles()
-        self.update()
-
-    def _reposition_crop_handles(self) -> None:
-        r = self._crop_preview
-        positions = {
-            "tl": r.topLeft(), "tr": r.topRight(),
-            "bl": r.bottomLeft(), "br": r.bottomRight(),
+        edges = {
+            "left": QPointF(-w / 2, 0),
+            "right": QPointF(w / 2, 0),
+            "top": QPointF(0, -h / 2),
+            "bottom": QPointF(0, h / 2),
         }
-        for handle in self._crop_handles:
-            handle.setPos(positions[handle._corner])
+        for edge, local_pos in edges.items():
+            handle_vp = view.mapFromScene(self.mapToScene(local_pos))
+            dx = click_vp.x() - handle_vp.x()
+            dy = click_vp.y() - handle_vp.y()
+            if math.hypot(dx, dy) <= EDGE_HANDLE_HIT_RADIUS_PX:
+                return edge
+        return None
 
-    def update_crop_corner(self, corner: str, local: QPointF) -> None:
-        r = self._crop_preview
-        if corner == "tl":
-            r = QRectF(local, r.bottomRight())
-        elif corner == "tr":
-            r = QRectF(QPointF(r.left(), local.y()), QPointF(local.x(), r.bottom()))
-        elif corner == "bl":
-            r = QRectF(QPointF(local.x(), r.top()), QPointF(r.right(), local.y()))
-        elif corner == "br":
-            r = QRectF(r.topLeft(), local)
-        self._crop_preview = r.normalized()
-        self._reposition_crop_handles()
-        self.update()
+    def _begin_crop_drag(self, edge: str) -> None:
+        """Start a crop-edge drag. Captures the press-time crop rect for
+        the undo commit-on-release pattern, and calls begin_transform()
+        so commit_transform() can snapshot the full item transform delta
+        (crop is not part of TransformCommand's snapshot, but calling
+        begin_transform/commit_transform here keeps the pattern uniform
+        and ensures any incidental position change during the drag is
+        captured). However, we push a dedicated CropItemCommand on release
+        rather than relying on TransformCommand, since crop is not part
+        of the transform snapshot tuple.
+        """
+        self._crop_drag_edge = edge
+        self._crop_drag_press_crop = QRect(self._crop)
+        self.begin_transform()
+
+    def _update_crop_drag(self, event) -> None:
+        """Move one edge of the crop rect to follow the cursor. The
+        opposite three edges stay fixed. Maps the scene-space cursor
+        position into the item's local coordinate system (where the crop
+        rect lives) and updates _crop in source-pixel space immediately,
+        so the artist sees the result with zero confirmation steps.
+        """
+        local = self.mapFromScene(event.scenePos())
+        full_w, full_h = self.natural_size()
+        # Map the local point (centered on the image) to a fraction of
+        # the current display area, then scale to source pixels within
+        # the current crop.
+        frac_x = (local.x() + full_w / 2) / full_w
+        frac_y = (local.y() + full_h / 2) / full_h
+        sx = self._source_pixmap.width()
+        sy = self._source_pixmap.height()
+        new_x = self._crop.x() + frac_x * self._crop.width()
+        new_y = self._crop.y() + frac_y * self._crop.height()
+
+        r = QRect(self._crop)
+        edge = self._crop_drag_edge
+        if edge == "left":
+            # New left edge at new_x; width shrinks from the left.
+            dx = round(new_x - r.x())
+            if r.width() - dx < MIN_CROP_PX:
+                dx = r.width() - MIN_CROP_PX
+            r.setLeft(r.x() + dx)
+            r.setWidth(r.width() - dx)
+        elif edge == "right":
+            dx = round(new_x - (r.x() + r.width()))
+            if r.width() + dx < MIN_CROP_PX:
+                dx = MIN_CROP_PX - r.width()
+            r.setWidth(r.width() + dx)
+        elif edge == "top":
+            dy = round(new_y - r.y())
+            if r.height() - dy < MIN_CROP_PX:
+                dy = r.height() - MIN_CROP_PX
+            r.setTop(r.y() + dy)
+            r.setHeight(r.height() - dy)
+        elif edge == "bottom":
+            dy = round(new_y - (r.y() + r.height()))
+            if r.height() + dy < MIN_CROP_PX:
+                dy = MIN_CROP_PX - r.height()
+            r.setHeight(r.height() + dy)
+
+        r = r.normalized()
+        if r != self._crop:
+            self._crop = r
+            self._handles.reposition()
+            self.update()
+
+    def _commit_crop(self) -> None:
+        """End a crop-edge drag. Pushes a single CropItemCommand onto the
+        undo stack if the crop actually changed — mirroring the
+        commit_transform() pattern for move/resize/rotate, but using a
+        dedicated command since crop is not part of the transform snapshot.
+        """
+        self.commit_transform()  # captures any incidental transform change
+        edge = self._crop_drag_edge
+        press_crop = self._crop_drag_press_crop
+        self._crop_drag_edge = None
+        self._crop_drag_press_crop = None
+        if edge is None or press_crop is None:
+            return
+        new_crop = QRect(self._crop)
+        if new_crop != press_crop:
+            scene = self.scene()
+            if scene is not None and hasattr(scene, "undo_stack"):
+                from ..canvas.undo_commands import CropItemCommand
+                scene.undo_stack.push(CropItemCommand(self, press_crop, new_crop, "Crop image"))
 
     # -- eyedropper -----------------------------------------------------
     def sample_source_pixel(self, scene_pos: QPointF) -> QPoint | None:
         """Map a scene-space point to a pixel coordinate in the full-
         resolution source image, for the eyedropper tool. Same local-
-        coords -> fraction -> source-pixel transform apply_crop() uses on
-        a rect below, generalized to a single point. Returns None if the
-        point falls outside the actual image (e.g. a click near the
-        padded handle-frame bounds that apply_crop()'s rect never has to
+        coords -> fraction -> source-pixel transform _update_crop_drag
+        uses on a point, generalized to a single point. Returns None if
+        the point falls outside the actual image (e.g. a click near the
+        padded handle-frame bounds that _update_crop_drag never has to
         handle).
         """
         local = self.mapFromScene(scene_pos)
@@ -609,55 +728,15 @@ class ReferenceImageItem(InteractiveItem):
 
     def set_crop(self, rect: QRect) -> None:
         """Apply a crop QRect directly (source-pixel coordinates). Used both
-        by apply_crop() below and by CropItemCommand's undo/redo.
+        by CropItemCommand's undo/redo and by reset_crop().
         """
         self.prepareGeometryChange()
         self._crop = QRect(rect)
         self._handles.reposition()
+        self._handles.set_crop_handles_visible(self._ui_active and not self._locked and not self._crop_is_full())
         self.update()
 
-    def apply_crop(self) -> None:
-        if not self._crop_mode:
-            return
-        full_w, full_h = self.natural_size()
-        r = self._crop_preview
-        # map preview rect (local, centered coords) -> fraction of current display -> source pixels
-        left_frac = (r.left() + full_w / 2) / full_w
-        top_frac = (r.top() + full_h / 2) / full_h
-        w_frac = r.width() / full_w
-        h_frac = r.height() / full_h
-
-        px = self._crop.x() + left_frac * self._crop.width()
-        py = self._crop.y() + top_frac * self._crop.height()
-        pw = max(4, w_frac * self._crop.width())
-        ph = max(4, h_frac * self._crop.height())
-        old_crop = QRect(self._crop)
-        new_crop = QRect(round(px), round(py), round(pw), round(ph))
-        self.cancel_crop()
-        if new_crop != old_crop:
-            scene = self.scene()
-            if scene is not None and hasattr(scene, "undo_stack"):
-                from ..canvas.undo_commands import CropItemCommand
-                scene.undo_stack.push(CropItemCommand(self, old_crop, new_crop))
-            else:
-                self.set_crop(new_crop)
-        self.update()
-
-    def cancel_crop(self) -> None:
-        self.prepareGeometryChange()
-        self._crop_mode = False
-        for handle in self._crop_handles:
-            handle.setVisible(False)
-        self._handles.set_active(self._ui_active and not self._locked)
-        self.update()
-
-    def is_cropping(self) -> bool:
-        return self._crop_mode
-
-    # -- Qt overrides -----------------------------------------------------
-    def _is_click_selectable(self) -> bool:
-        return not self._crop_mode
-
+    # -- Qt overrides ---------------------------------------------------
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange and self._body_dragging:
             return self._snap_position(value)
@@ -741,17 +820,10 @@ class ReferenceImageItem(InteractiveItem):
             pixmap, source_rect = self._get_display_pixmap()
             painter.drawPixmap(rect, pixmap, source_rect)
 
-        if self._crop_mode:
-            path = QPainterPath()
-            path.addRect(rect)
-            path.addRect(self._crop_preview)
-            painter.setBrush(QBrush(QColor(0, 0, 0, 140)))
-            painter.setPen(Qt.NoPen)
-            painter.drawPath(path)
-            painter.setPen(QPen(QColor(C.COLOR_FOCAL_PRIMARY), 0))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(self._crop_preview)
-            return
+        # Show crop handles via HandleFrame — no separate crop mode needed.
+        # The edge handles (left/right/top/bottom) are managed by HandleFrame
+        # and shown whenever this item is selected and has an active crop.
+        # No overlay needed — the handles themselves are the affordance.
 
         if self._ui_active and not self._locked:
             pen = QPen(QColor(C.COLOR_BRASS), 0, Qt.SolidLine)

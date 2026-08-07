@@ -87,11 +87,10 @@ class PropertiesPanel(QWidget):
         # Fixed regardless of which controls are currently visible — with
         # no minimum, the dock's preferred width tracked whatever group box
         # happened to be shown (e.g. the empty "Nothing selected" state is
-        # far narrower than the crop row's three buttons or the batch-align
-        # icon row), so simply switching the canvas selection made the
-        # whole right-hand dock visibly resize. Sized for the widest
-        # realistic row (the crop button trio) plus margin, so it also
-        # reads less cramped ("wider") even at rest.
+        # far narrower than the Reset Crop button or the batch-align icon
+        # row), so simply switching the canvas selection made the whole
+        # right-hand dock visibly resize. Sized for the widest realistic
+        # row plus margin, so it also reads less cramped even at rest.
         self.setMinimumWidth(300)
 
         layout = QVBoxLayout(self)
@@ -194,16 +193,14 @@ class PropertiesPanel(QWidget):
         clarity_row.addWidget(self.clarity_slider)
         tform.addLayout(clarity_row)
 
+        # Reset-crop button — crop is now direct manipulation via edge
+        # handles on the canvas; this button just clears the crop back to
+        # the full image (with undo support). Replaces the old three-button
+        # Crop/Apply/Cancel flow.
+        self.reset_crop_btn = QPushButton("Reset Crop")
+        self.reset_crop_btn.clicked.connect(self._on_reset_crop)
         crop_row = QHBoxLayout()
-        self.crop_btn = QPushButton("Crop…")
-        self.crop_btn.clicked.connect(self._on_crop_clicked)
-        self.crop_apply_btn = QPushButton("Apply Crop")
-        self.crop_apply_btn.clicked.connect(self._on_crop_apply)
-        self.crop_cancel_btn = QPushButton("Cancel")
-        self.crop_cancel_btn.clicked.connect(self._on_crop_cancel)
-        crop_row.addWidget(self.crop_btn)
-        crop_row.addWidget(self.crop_apply_btn)
-        crop_row.addWidget(self.crop_cancel_btn)
+        crop_row.addWidget(self.reset_crop_btn)
         tform.addLayout(crop_row)
 
         self.lock_box = QCheckBox("Locked")
@@ -344,9 +341,7 @@ class PropertiesPanel(QWidget):
 
         for w in (self.info_box, self.transform_box, self.note_box, self.position_box, self.delete_btn, self.batch_box):
             w.setVisible(False)
-        self.crop_apply_btn.setVisible(False)
-        self.crop_cancel_btn.setVisible(False)
-        self.crop_btn.setVisible(False)
+        self.reset_crop_btn.setVisible(False)
 
         if item is None:
             if multiple:
@@ -374,14 +369,14 @@ class PropertiesPanel(QWidget):
                     f"Dimensions: {item._source_pixmap.width()} × {item._source_pixmap.height()} px"
                 )
                 self.transform_box.setVisible(True)
-                self.crop_btn.setVisible(True)
-                # A locked image can't actually enter crop mode (see
-                # ReferenceImageItem.enter_crop_mode's early return) — the
-                # button used to stay enabled anyway and silently do
-                # nothing when clicked. It now looks as unavailable as it is.
-                self.crop_btn.setEnabled(not item.is_locked())
-                self.crop_btn.setToolTip(
-                    "Unlock this image to crop it." if item.is_locked() else ""
+                # "Reset Crop" button is shown whenever the image has a
+                # crop applied — crop itself is done via edge handles on
+                # the canvas (direct manipulation, no "enter crop mode"
+                # needed). The button clears it back to full via undo.
+                self.reset_crop_btn.setVisible(True)
+                self.reset_crop_btn.setEnabled(not item.is_locked())
+                self.reset_crop_btn.setToolTip(
+                    "Unlock this image to reset crop." if item.is_locked() else ""
                 )
                 self.delete_btn.setVisible(True)
                 self.scale_spin.setValue(item.scale_factor())
@@ -392,9 +387,6 @@ class PropertiesPanel(QWidget):
                 self.lock_box.setChecked(item.is_locked())
                 self._scale_last = item.scale_factor()
                 self._rotation_last = item.rotation()
-                if item.is_cropping():
-                    self.crop_apply_btn.setVisible(True)
-                    self.crop_cancel_btn.setVisible(True)
 
             elif isinstance(item, NoteItem):
                 self.title.setText("Note")
@@ -686,8 +678,8 @@ class PropertiesPanel(QWidget):
         # state) — this stays a direct call.
         if not self._updating and isinstance(self._current, ReferenceImageItem):
             self._current.set_locked(on)
-            self.crop_btn.setEnabled(not on)
-            self.crop_btn.setToolTip("Unlock this image to crop it." if on else "")
+            self.reset_crop_btn.setEnabled(not on)
+            self.reset_crop_btn.setToolTip("Unlock this image to reset crop." if on else "")
 
     def _on_note_changed(self) -> None:
         if self._updating or not isinstance(self._current, NoteItem):
@@ -711,17 +703,6 @@ class PropertiesPanel(QWidget):
             if scene is not None and hasattr(scene, "undo_stack"):
                 scene.undo_stack.push(SetNoteTextCommand(item, old, new))
 
-    def _on_crop_clicked(self) -> None:
+    def _on_reset_crop(self) -> None:
         if isinstance(self._current, ReferenceImageItem):
-            self._current.enter_crop_mode()
-            self.refresh()
-
-    def _on_crop_apply(self) -> None:
-        if isinstance(self._current, ReferenceImageItem):
-            self._current.apply_crop()
-            self.refresh()
-
-    def _on_crop_cancel(self) -> None:
-        if isinstance(self._current, ReferenceImageItem):
-            self._current.cancel_crop()
-            self.refresh()
+            self._current.reset_crop()
