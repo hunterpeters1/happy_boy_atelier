@@ -1,13 +1,14 @@
 """MainWindow: menus, toolbar, docks, and the top-level project lifecycle
-(new / open / save / import / export / lock / projector)."""
+(new / open / save / import / export / lock)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QPointF, QSettings, QSize, QStandardPaths, QTimer
-from PySide6.QtGui import QAction, QKeySequence, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QDockWidget,
     QFileDialog,
     QLabel,
@@ -17,8 +18,12 @@ from PySide6.QtWidgets import (
 )
 
 from . import constants as C
+from . import debug_tools
 from . import icons
 from . import recovery
+from . import themes
+from .hacker_status import HackerStatusWidget
+from .theme import apply_theme
 from .atelier_io import (
     AtelierIOError,
     export_jpg,
@@ -38,27 +43,37 @@ from .dialogs.new_project_dialog import NewProjectDialog
 from .dialogs.start_screen import StartScreen
 from .panels.layers_panel import LayersPanel
 from .panels.properties_panel import PropertiesPanel
-from .project import CanvasSpec, ProjectMeta, empty_manifest
-from .projector.projector_window import ProjectorWindow
+from .project import CanvasSpec, ProjectMeta
 
 MAX_RECENT_FILES = 10
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, theme_mode: themes.ThemeMode = themes.DEFAULT_THEME):
         super().__init__()
         self.setWindowTitle(C.APP_NAME)
         self.resize(1440, 920)
 
         self.current_path: Path | None = None
         self.meta = ProjectMeta()
-        self.projector_state = empty_manifest(CanvasSpec(), self.meta)["projector_state"]
-        self._projector_window: ProjectorWindow | None = None
 
         self.scene: CanvasScene | None = None
         self.view: CanvasView | None = None
         self.layers_dock: QDockWidget | None = None
         self.properties_dock: QDockWidget | None = None
+
+        # Appearance (see themes.py) — caller (main.py) already applied
+        # this mode's palette to constants.py and ran apply_theme() before
+        # constructing us, so our own widgets are built with the right
+        # colors from the start; this just tracks what's active so the
+        # Appearance menu shows the right radio checked and so hack-mode
+        # extras (Debug menu, hacker status widget) can be set up if we're
+        # starting directly in Hack Mode.
+        self._theme_mode = theme_mode
+        self._debug_menu = None
+        self._hacker_widget: HackerStatusWidget | None = None
+        self._stats_label: QLabel | None = None
+        self._stats_timer: QTimer | None = None
 
         self.status_hint = QLabel("")
         self.status_lock_banner = QLabel("SETUP LOCKED")
@@ -68,6 +83,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.status_hint)
 
         self._build_menu_and_toolbar()
+        self._set_hack_mode_active(self._theme_mode == themes.ThemeMode.HACK)
         self._start_project_or_offer_recovery()
 
         # Phase 0.3: periodic crash-recovery snapshot. Independent of the
@@ -121,7 +137,6 @@ class MainWindow(QMainWindow):
 
             spec = CanvasSpec.from_dict(manifest.get("canvas", {}))
             self.meta = ProjectMeta.from_dict(manifest.get("meta", {}))
-            self.projector_state = manifest.get("projector_state", self.projector_state)
 
             scene = CanvasScene(spec)
             scene.load_manifest_layers(manifest, images)
@@ -250,6 +265,9 @@ class MainWindow(QMainWindow):
         """
         if self.scene is None:
             return
+        if debug_tools.VERBOSE_LOGGING:
+            cmd_text = self.scene.undo_stack.command(_index - 1).text() if _index > 0 else "clean"
+            debug_tools.log(f"undo_stack.index -> {_index} ({cmd_text})")
         self.properties_panel.refresh()
         self.layers_panel.sync_from_scene()
         self.layers_panel.refresh_reference_list()
@@ -295,15 +313,21 @@ class MainWindow(QMainWindow):
         self.undo_action.setEnabled(False)
         self.undo_action.triggered.connect(lambda: self.scene.undo_stack.undo() if self.scene else None)
         self._set_tooltip(self.undo_action)
+        icons.register(self.undo_action, lambda obj, ic: obj.setIcon(ic), "undo")
         edit_menu.addAction(self.undo_action)
         self.redo_action = QAction(icons.icon("redo"), "Redo", self)
         self.redo_action.setShortcut(QKeySequence.Redo)
         self.redo_action.setEnabled(False)
         self.redo_action.triggered.connect(lambda: self.scene.undo_stack.redo() if self.scene else None)
         self._set_tooltip(self.redo_action)
+        icons.register(self.redo_action, lambda obj, ic: obj.setIcon(ic), "redo")
         edit_menu.addAction(self.redo_action)
         edit_menu.addSeparator()
         self._add_action(edit_menu, "Delete Selected", "Del", self._delete_selected, icon_name="delete")
+        edit_menu.addSeparator()
+        self.lock_action = self._add_action(
+            edit_menu, "Lock Setup", "Ctrl+L", self.toggle_lock_setup, checkable=True, icon_name="lock"
+        )
 
         view_menu = menu.addMenu("&View")
         self._add_action(view_menu, "Zoom In", "Ctrl+=", lambda: self.view.zoom_in())
@@ -325,14 +349,20 @@ class MainWindow(QMainWindow):
         self.palette_action = self._add_action(
             view_menu, "Command Palette…", "Ctrl+K", self.open_command_palette
         )
-
-        mode_menu = menu.addMenu("&Mode")
-        self.lock_action = self._add_action(
-            mode_menu, "Lock Setup", "Ctrl+L", self.toggle_lock_setup, checkable=True, icon_name="lock"
-        )
-        self.projector_action = self._add_action(
-            mode_menu, "Enter Projector Mode", "F5", self.enter_projector_mode, icon_name="projector"
-        )
+        view_menu.addSeparator()
+        appearance_menu = view_menu.addMenu("Appearance")
+        self._theme_actions: dict[themes.ThemeMode, QAction] = {}
+        theme_group = QActionGroup(self)
+        theme_group.setExclusive(True)
+        for mode in (themes.ThemeMode.LIGHT, themes.ThemeMode.DARK,
+                     themes.ThemeMode.CURRENT, themes.ThemeMode.HACK):
+            action = QAction(themes.THEME_LABELS[mode], self)
+            action.setCheckable(True)
+            action.setChecked(mode == self._theme_mode)
+            action.triggered.connect(lambda _checked, m=mode: self._set_theme(m))
+            theme_group.addAction(action)
+            appearance_menu.addAction(action)
+            self._theme_actions[mode] = action
 
         help_menu = menu.addMenu("&Help")
         self._add_action(help_menu, "About Happy Boy Atelier", None, self._show_about)
@@ -346,7 +376,7 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("Main")
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        toolbar.setIconSize(QSize(20, 20))
+        toolbar.setIconSize(QSize(22, 22))
         self.addToolBar(toolbar)
         toolbar.addAction(self.new_action)
         toolbar.addAction(self.open_action)
@@ -361,7 +391,117 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.fit_action)
         toolbar.addSeparator()
         toolbar.addAction(self.lock_action)
-        toolbar.addAction(self.projector_action)
+
+    # -- appearance -----------------------------------------------------
+    def _set_theme(self, mode: themes.ThemeMode) -> None:
+        if mode == self._theme_mode:
+            return
+        self._theme_mode = mode
+        QSettings().setValue("appearance/theme", mode.value)
+        themes.apply_palette(mode)
+        apply_theme(QApplication.instance())
+        self._set_hack_mode_active(mode == themes.ThemeMode.HACK)
+        self._refresh_icon_colors()
+        if self.scene is not None:
+            self.scene.update()
+        if self.view is not None:
+            self.view.refresh_theme_colors()
+        debug_tools.log(f"theme changed -> {mode.value}")
+        self.statusBar().showMessage("Theme changed.", 4000)
+
+    def _refresh_icon_colors(self) -> None:
+        """Re-bake every menu/toolbar/Properties-panel icon with the
+        theme's current colors (icons.icon() bakes a QPixmap at call
+        time, so already-set QIcons don't update on their own — see
+        icons.py's registry). The Project Panel isn't registered
+        individually; its whole tree is cheap to rebuild from scratch and
+        that already re-renders every icon it contains.
+        """
+        icons.refresh_all()
+        layers_panel = getattr(self, "layers_panel", None)
+        if layers_panel is not None:
+            layers_panel.refresh_structure()
+
+    def _set_hack_mode_active(self, active: bool) -> None:
+        """Crazy Hack Mode's extras: a Debug menu (verbose logging, a live
+        scene-stats readout, a stylesheet-reload action) and the fake
+        status-bar hacker widget — see debug_tools.py and
+        hacker_status.py. Both are created/torn down here rather than
+        just hidden, so they don't sit around doing nothing (or, for the
+        status widget, animating on a timer) while some other theme is
+        active.
+        """
+        if active and self._debug_menu is None:
+            self._debug_menu = self.menuBar().addMenu("&Debug")
+            self.verbose_log_action = self._add_action(
+                self._debug_menu, "Verbose Console Logging", None,
+                self._toggle_verbose_logging, checkable=True,
+            )
+            self.stats_overlay_action = self._add_action(
+                self._debug_menu, "Scene Stats in Status Bar", None,
+                self._toggle_stats_overlay, checkable=True,
+            )
+            self._add_action(self._debug_menu, "Reload Stylesheet", None, self._reload_stylesheet)
+        elif not active and self._debug_menu is not None:
+            self.menuBar().removeAction(self._debug_menu.menuAction())
+            self._debug_menu.deleteLater()
+            self._debug_menu = None
+            debug_tools.VERBOSE_LOGGING = False
+            self._stop_stats_overlay()
+
+        if active and self._hacker_widget is None:
+            self._hacker_widget = HackerStatusWidget()
+            self.statusBar().addPermanentWidget(self._hacker_widget)
+        elif not active and self._hacker_widget is not None:
+            self.statusBar().removeWidget(self._hacker_widget)
+            self._hacker_widget.stop()
+            self._hacker_widget.deleteLater()
+            self._hacker_widget = None
+
+    def _toggle_verbose_logging(self, on: bool) -> None:
+        debug_tools.VERBOSE_LOGGING = on
+        debug_tools.log("verbose logging enabled" if on else "verbose logging disabled")
+
+    def _toggle_stats_overlay(self, on: bool) -> None:
+        if not on:
+            self._stop_stats_overlay()
+            return
+        if self._stats_label is None:
+            self._stats_label = QLabel()
+            self._stats_label.setStyleSheet(
+                f"color: {C.COLOR_INK_DIM}; font-family: '{C.FONT_FAMILY_MONO}'; font-size: 10px;"
+            )
+            self.statusBar().addPermanentWidget(self._stats_label)
+        if self._stats_timer is None:
+            self._stats_timer = QTimer(self)
+            self._stats_timer.timeout.connect(self._update_stats_label)
+            self._stats_timer.start(500)
+        self._update_stats_label()
+
+    def _stop_stats_overlay(self) -> None:
+        if self._stats_timer is not None:
+            self._stats_timer.stop()
+            self._stats_timer = None
+        if self._stats_label is not None:
+            self.statusBar().removeWidget(self._stats_label)
+            self._stats_label.deleteLater()
+            self._stats_label = None
+        if hasattr(self, "stats_overlay_action"):
+            self.stats_overlay_action.setChecked(False)
+
+    def _update_stats_label(self) -> None:
+        if self._stats_label is None:
+            return
+        self._stats_label.setText(debug_tools.scene_stats(self.scene) if self.scene is not None else "no project open")
+
+    def _reload_stylesheet(self) -> None:
+        apply_theme(QApplication.instance())
+        self._refresh_icon_colors()
+        if self.scene is not None:
+            self.scene.update()
+        if self.view is not None:
+            self.view.refresh_theme_colors()
+        debug_tools.log("stylesheet reloaded")
 
     def _set_tooltip(self, action: QAction) -> None:
         shortcut = action.shortcut().toString()
@@ -372,6 +512,8 @@ class MainWindow(QMainWindow):
         self, menu, text, shortcut, slot, checkable: bool = False, icon_name: str | None = None
     ) -> QAction:
         action = QAction(icons.icon(icon_name), text, self) if icon_name else QAction(text, self)
+        if icon_name:
+            icons.register(action, lambda obj, ic: obj.setIcon(ic), icon_name)
         if shortcut:
             action.setShortcut(QKeySequence(shortcut))
         action.setCheckable(checkable)
@@ -485,14 +627,22 @@ class MainWindow(QMainWindow):
                 if pixmap.isNull():
                     continue
                 offset_center = center + QPointF(cascade * 18, cascade * 18)
+                src = Path(path)
+                try:
+                    original_file_size = src.stat().st_size
+                except OSError:
+                    original_file_size = None
                 item = self.scene.reference_layer.build_image_item(
-                    pixmap, rect.width(), rect.height(), offset_center, display_name=Path(path).name
+                    pixmap, rect.width(), rect.height(), offset_center, display_name=src.name,
+                    original_format=src.suffix.lstrip(".").upper() or None,
+                    original_file_size=original_file_size,
                 )
                 self.scene.undo_stack.push(AddItemCommand(self.scene.reference_layer, item, "Add reference image"))
                 cascade += 1
         finally:
             if multi:
                 self.scene.undo_stack.endMacro()
+        debug_tools.log(f"imported {cascade} reference image(s)")
         self.layers_panel.refresh_reference_list()
 
     def _build_manifest(self) -> tuple[dict, dict]:
@@ -509,7 +659,6 @@ class MainWindow(QMainWindow):
         }
         layers, images = self.scene.to_manifest_layers()
         manifest.update(layers)
-        manifest["projector_state"] = self.projector_state
         return manifest, images
 
     def save_project(self, force_dialog: bool = False) -> None:
@@ -574,7 +723,6 @@ class MainWindow(QMainWindow):
 
         spec = CanvasSpec.from_dict(manifest.get("canvas", {}))
         self.meta = ProjectMeta.from_dict(manifest.get("meta", {}))
-        self.projector_state = manifest.get("projector_state", self.projector_state)
 
         scene = CanvasScene(spec)
         scene.load_manifest_layers(manifest, images)
@@ -605,6 +753,11 @@ class MainWindow(QMainWindow):
         filename = str(dialog.destination_path())
 
         rect = self.scene.canvas_rect()
+        # Only True for the duration of this export call — reset in
+        # finally regardless of outcome, so a later Save's thumbnail
+        # generation (a separate rendering_for_export-covered call) never
+        # picks up a stale "bake the effect in" flag from a past export.
+        self.scene.export_study_effect = dialog.include_study_effect()
         try:
             if fmt == "png":
                 export_png(self.scene, rect, filename, dpi=dpi, px_per_inch=C.SCENE_PX_PER_INCH)
@@ -619,9 +772,12 @@ class MainWindow(QMainWindow):
         except (AtelierIOError, OSError) as exc:
             QMessageBox.critical(self, "Export Failed", str(exc))
             return
+        finally:
+            self.scene.export_study_effect = False
+        debug_tools.log(f"exported {fmt} @ {dpi}dpi -> {filename}")
         self.statusBar().showMessage(f"Exported to {Path(filename).name}", 4000)
 
-    # -- lock / projector ----------------------------------------------
+    # -- lock -------------------------------------------------------------
     def toggle_lock_setup(self) -> None:
         if self.scene is None:
             return
@@ -630,27 +786,19 @@ class MainWindow(QMainWindow):
         self.lock_action.setChecked(locked)
         self.layers_panel.setEnabled(not locked)
         self._update_lock_banner()
+        debug_tools.log(f"setup lock -> {locked}")
 
     def _update_lock_banner(self) -> None:
         locked = self.scene.is_globally_locked() if self.scene else False
         self.status_lock_banner.setVisible(locked)
 
-    def enter_projector_mode(self) -> None:
-        if self.scene is None:
-            return
-        self._projector_window = ProjectorWindow(self.scene, initial_state=self.projector_state)
-        self._projector_window.closed.connect(self._on_projector_closed)
-
-    def _on_projector_closed(self) -> None:
-        if self._projector_window is not None:
-            self.projector_state = self._projector_window.get_state()
-            self._projector_window = None
-
     # -- misc -----------------------------------------------------------
     def _delete_selected(self) -> None:
         if self.scene is None:
             return
+        n = len(self.scene.selected_items())
         self.scene.delete_selected_items()
+        debug_tools.log(f"deleted {n} selected item(s)")
         self.layers_panel.refresh_reference_list()
         self.properties_panel.refresh()
 

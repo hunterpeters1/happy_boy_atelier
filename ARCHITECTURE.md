@@ -1,8 +1,8 @@
 # Happy Boy Atelier — Architecture
 
-A digital drafting table for traditional painters: canvas planning, reference
-arrangement, composition/perspective/lighting study, and projector-assisted
-transfer. Not a paint program, not a generator.
+A digital drafting table for traditional painters: canvas planning,
+reference arrangement, and composition/perspective/lighting study. Not a
+paint program, not a generator.
 
 ## Stack
 
@@ -61,8 +61,6 @@ happy_boy_atelier/
       export_dialog.py          format/DPI/destination on one panel, no second native Save dialog
       command_palette.py        Ctrl+K fuzzy search over every QAction in the menu bar
       start_screen.py           launch-time recent-paintings picker with real thumbnails
-    projector/
-      projector_window.py       fullscreen projector mode + Lock Projection
   resources/
     icons/                      app.ico / app.png (window & taskbar icon only — the in-app toolbar/
                                  panel icon language lives in app/icons.py, not as files here)
@@ -120,14 +118,15 @@ full manifest/images, which is what the start screen's thumbnail grid uses.
     "arrows": [{"kind": "light|shadow", "x1":..,"y1":..,"x2":..,"y2":..}],
     "notes": [{"x":.., "y":.., "text": "..."}]
   },
-  "guides": {"rule_of_thirds": false, "golden_ratio": false},
-  "projector_state": {"opacity":.., "zoom":.., "pan": [x,y], "rotation":..,
-                       "flip_h": false, "locked": false}
+  "guides": {"rule_of_thirds": false, "golden_ratio": false}
 }
 ```
 
 Images are embedded (never referenced by external path), satisfying the
 "self-contained project file" requirement. Loading is fully offline.
+Older files saved while projector mode existed may still carry a
+`"projector_state"` field — it's simply ignored on load and dropped on
+next save.
 
 Reference entries carry two back-compat fallbacks worth preserving when
 touching (de)serialization: `"name"` (the Project Panel's display name,
@@ -209,10 +208,10 @@ position fields.
   (`ItemIsMovable`/`ItemIsSelectable` cleared everywhere); a status-bar
   banner and toolbar toggle make the state unmistakable. Unlock requires an
   explicit action (no accidental edits).
-- **Projector mode**: separate fullscreen `QWidget` (own window, own
-  `QGraphicsView`) rendering the reference layer + optional guide overlay,
-  with its own opacity/zoom/pan/rotation/flip and a "Lock Projection"
-  toggle that disables further transform input until unlocked.
+
+Projector mode (a separate fullscreen tracing-aid window) existed here
+through the UX redesign below but has been removed entirely, along with
+its `.atelier` `projector_state` field — see git history if reviving it.
 
 ## Undo/redo
 
@@ -290,7 +289,7 @@ actually built — that folder holds only the window/taskbar icon
 
 Beyond the original MVP (create canvas → import & arrange references →
 composition guides → perspective grids → lighting notes → save/reopen
-`.atelier` → projector mode → lock setup → PNG/JPG/PDF export), the app
+`.atelier` → lock setup → PNG/JPG/PDF export), the app
 now also covers: undo/redo, crash recovery, a real outliner-based
 Project Panel, a unified selection model, an Inspector with editable
 vanishing-point/horizon coordinates and multi-select batch editing, a

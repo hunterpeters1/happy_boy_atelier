@@ -33,6 +33,7 @@ this class, since those drags originate on a child handle item, not here.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
 from .selection import select_on_left_click
@@ -43,6 +44,11 @@ class InteractiveItem(QGraphicsObject):
         super().__init__(parent)
         self._locked = False
         self._transform_snapshot = None
+        # Subclasses call set_normal_cursor() (not raw setCursor()) so
+        # _on_locked_changed()'s default below can restore the right
+        # cursor after an unlock, instead of every subclass needing its
+        # own lock-cursor override (see set_normal_cursor()).
+        self._normal_cursor = None
         # NOT Qt's own isSelected()/setSelected() — confirmed at runtime
         # (a real QTest.mouseClick simulation, not just informal
         # suspicion) that selection state does not stick for children of a
@@ -56,6 +62,17 @@ class InteractiveItem(QGraphicsObject):
             | QGraphicsItem.ItemIsSelectable
             | QGraphicsItem.ItemSendsGeometryChanges
         )
+        # Qt rasterizes this item once and re-blits the cached raster on a
+        # pure-translation move (a body drag) instead of re-running
+        # paint() every frame — the single biggest lever for making
+        # dragging feel smooth, and free for every subclass since this is
+        # the shared base every selectable marker already goes through.
+        # Rotate/scale still regenerate the cache each frame (the device
+        # transform changed), which is what ReferenceImageItem's display
+        # proxy separately targets for resize. Existing prepareGeometryChange()
+        # calls (crop, active-state, lock changes) already invalidate this
+        # correctly — Qt ties cache invalidation to the same mechanism.
+        self.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
 
     # -- lock -------------------------------------------------------------
     def is_locked(self) -> bool:
@@ -82,10 +99,27 @@ class InteractiveItem(QGraphicsObject):
         self._app_selected = selected
         self.update()
 
-    def _on_locked_changed(self, locked: bool) -> None:
-        """Hook: react to a lock state change (e.g. hide transform
-        handles, swap the cursor). No-op by default.
+    # -- cursor -------------------------------------------------------------
+    def set_normal_cursor(self, cursor) -> None:
+        """Subclasses call this in __init__ instead of raw setCursor() —
+        it's what _on_locked_changed() below restores on unlock, so every
+        item gets correct "locked = arrow cursor" behavior automatically
+        rather than each subclass needing its own override for that one
+        concern (previously only ReferenceImageItem bothered).
         """
+        self._normal_cursor = cursor
+        if not self._locked:
+            self.setCursor(cursor)
+
+    def _on_locked_changed(self, locked: bool) -> None:
+        """Hook: react to a lock state change. Default swaps to an arrow
+        cursor when locked and restores set_normal_cursor()'s cursor on
+        unlock — override (calling super() first) for extra behavior
+        (e.g. hiding transform handles, or a hover-position-dependent
+        cursor like ReferenceImageItem's, which replaces this entirely).
+        """
+        if self._normal_cursor is not None:
+            self.setCursor(Qt.ArrowCursor if locked else self._normal_cursor)
 
     # -- click-to-select ----------------------------------------------------
     def _is_click_selectable(self) -> bool:

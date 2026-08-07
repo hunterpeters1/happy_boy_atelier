@@ -1,12 +1,16 @@
-"""Export panel: format, resolution, and destination on one surface.
+"""Export panel: destination, format, and (secondary) resolution on one
+surface.
 
 Previously this dialog only chose format/DPI — clicking OK then opened a
 second, entirely separate native Save dialog with no filename suggested
 from the project name, so exporting was always at least two dialogs and
 two decisions. The destination now lives here too, pre-filled from the
-project's own name and the project file's own folder, with a live
-preview that updates as the format changes and a Browse… button only for
-when the artist actually wants to override it.
+project's own name and the project file's own folder. DPI is a real,
+useful setting (it controls the actual pixel size of the exported
+raster) but reads as an odd, overly technical first-thing-you-see —
+"Choose Destination…" is now the prominent, first action (a real native
+file dialog, same as Save As), with format next and DPI last as a small
+secondary field that most artists can just leave alone.
 """
 
 from __future__ import annotations
@@ -16,12 +20,13 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QLineEdit,
+    QLabel,
     QPushButton,
     QRadioButton,
     QSpinBox,
@@ -44,12 +49,28 @@ class ExportDialog(QDialog):
         self.setMinimumWidth(440)
         self._stem = _sanitize_filename(project_name)
         self._dir = default_dir
-        # Only set once the artist actually uses Browse… — until then the
-        # destination is fully computed from project name + format, and
-        # keeps recomputing live as the format radio changes.
+        # Only set once the artist actually uses Choose Destination… —
+        # until then the destination is fully computed from project name +
+        # format, and keeps recomputing live as the format radio changes.
         self._explicit_path: Path | None = None
 
         layout = QVBoxLayout(self)
+
+        # -- destination: the prominent, first action — a real native file
+        # dialog, exactly like Save As, rather than a small "Browse…"
+        # button tucked next to an easy-to-miss text field.
+        dest_row = QHBoxLayout()
+        choose_btn = QPushButton("Choose Destination…")
+        choose_btn.setDefault(True)
+        choose_btn.clicked.connect(self._on_browse)
+        dest_row.addWidget(choose_btn)
+        self.dest_label = QLabel()
+        self.dest_label.setWordWrap(True)
+        self.dest_label.setProperty("role", "hint")
+        dest_row.addWidget(self.dest_label, 1)
+        layout.addLayout(dest_row)
+
+        layout.addSpacing(8)
 
         self.group = QButtonGroup(self)
         row = QHBoxLayout()
@@ -63,24 +84,35 @@ class ExportDialog(QDialog):
             row.addWidget(r)
         layout.addLayout(row)
 
+        layout.addSpacing(8)
+
+        # -- DPI: still real (it sets the exported raster's actual pixel
+        # size) but secondary — most artists never need to touch it, so it
+        # no longer competes with destination/format for attention.
         form = QFormLayout()
+        dpi_label = QLabel("Output DPI")
+        dpi_label.setProperty("role", "hint")
         self.dpi_spin = QSpinBox()
         self.dpi_spin.setRange(72, 1200)
         self.dpi_spin.setValue(300)
-        form.addRow("Output DPI", self.dpi_spin)
+        self.dpi_spin.setToolTip(
+            "Resolution of the exported image, in pixels per inch. 300 is a "
+            "standard print resolution; higher only matters for large-format "
+            "or professional printing. Not used for PDF (vector output)."
+        )
+        form.addRow(dpi_label, self.dpi_spin)
         layout.addLayout(form)
         self.pdf_radio.toggled.connect(lambda on: self.dpi_spin.setEnabled(not on))
 
-        dest_row = QHBoxLayout()
-        self.dest_edit = QLineEdit()
-        self.dest_edit.textEdited.connect(self._on_dest_edited)
-        browse_btn = QPushButton("Browse…")
-        browse_btn.clicked.connect(self._on_browse)
-        dest_row.addWidget(self.dest_edit, 1)
-        dest_row.addWidget(browse_btn)
-        dest_form = QFormLayout()
-        dest_form.addRow("Save as", dest_row)
-        layout.addLayout(dest_form)
+        layout.addSpacing(8)
+        self.study_effect_check = QCheckBox("Include Study Blur effect")
+        self.study_effect_check.setToolTip(
+            "Off by default: exports always render the crisp original "
+            "regardless of any Blur/Line Clarity dialed in on screen. "
+            "Check this to bake whatever's currently set on each "
+            "reference image into this export instead."
+        )
+        layout.addWidget(self.study_effect_check)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Export")
@@ -90,25 +122,21 @@ class ExportDialog(QDialog):
 
         self._update_destination_preview()
 
-    def _on_dest_edited(self, text: str) -> None:
-        self._explicit_path = Path(text) if text.strip() else None
-
     def _update_destination_preview(self) -> None:
         fmt = self.selected_format()
         if self._explicit_path is not None:
             path = self._explicit_path.with_suffix(f".{fmt}")
         else:
             path = self._dir / f"{self._stem}.{fmt}"
-        self.dest_edit.blockSignals(True)
-        self.dest_edit.setText(str(path))
-        self.dest_edit.blockSignals(False)
+        self.dest_label.setText(str(path))
 
     def _on_browse(self) -> None:
         fmt = self.selected_format()
-        filename, _ = QFileDialog.getSaveFileName(self, "Export", self.dest_edit.text(), _FILTERS[fmt])
+        current = self._explicit_path or (self._dir / f"{self._stem}.{fmt}")
+        filename, _ = QFileDialog.getSaveFileName(self, "Export", str(current), _FILTERS[fmt])
         if filename:
             self._explicit_path = Path(filename)
-            self.dest_edit.setText(filename)
+            self._update_destination_preview()
 
     def selected_format(self) -> str:
         if self.jpg_radio.isChecked():
@@ -120,9 +148,12 @@ class ExportDialog(QDialog):
     def dpi(self) -> int:
         return self.dpi_spin.value()
 
+    def include_study_effect(self) -> bool:
+        return self.study_effect_check.isChecked()
+
     def destination_path(self) -> Path:
         fmt = self.selected_format()
-        text = self.dest_edit.text().strip()
+        text = self.dest_label.text().strip()
         path = Path(text) if text else self._dir / f"{self._stem}.{fmt}"
         if path.suffix.lower() != f".{fmt}":
             path = path.with_suffix(f".{fmt}")

@@ -20,7 +20,7 @@ axes rather than screen axes.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor, QCursor, QPen
+from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsRectItem
 
 from .. import constants as C
@@ -40,7 +40,11 @@ class _CornerScaleHandle(QGraphicsRectItem):
     the whole image rather than resizing it — a known Qt limitation with
     hit-testing ItemIgnoresTransformations children over a transformed
     parent. setAcceptedMouseButtons(NoButton) below makes that explicit
-    rather than relying on it being accidentally unreachable.
+    rather than relying on it being accidentally unreachable — for the
+    same reason, this item never receives hover events either, so it sets
+    no cursor of its own: the corner-resize cursor is
+    ReferenceImageItem.hoverMoveEvent()'s job, computed the same way
+    _hit_test_handle() decides whether a click landed here.
     """
 
     def __init__(self, target, sign_x: int, sign_y: int):
@@ -52,7 +56,6 @@ class _CornerScaleHandle(QGraphicsRectItem):
         self.setBrush(QBrush(QColor(C.COLOR_BRASS)))
         self.setPen(QPen(QColor(C.COLOR_BG_DARKEST), 1))
         self.setZValue(1000)
-        self.setCursor(QCursor(Qt.SizeFDiagCursor if sign_x * sign_y > 0 else Qt.SizeBDiagCursor))
         self.setAcceptedMouseButtons(Qt.NoButton)
 
     def reposition(self) -> None:
@@ -61,7 +64,8 @@ class _CornerScaleHandle(QGraphicsRectItem):
 
 
 class _RotateHandle(QGraphicsRectItem):
-    """Purely decorative — see _CornerScaleHandle docstring above."""
+    """Purely decorative — see _CornerScaleHandle docstring above (same
+    applies to its cursor: ReferenceImageItem.hoverMoveEvent() handles it)."""
 
     def __init__(self, target):
         super().__init__(-HANDLE_PX / 2, -HANDLE_PX / 2, HANDLE_PX, HANDLE_PX, target)
@@ -70,7 +74,6 @@ class _RotateHandle(QGraphicsRectItem):
         self.setBrush(QBrush(QColor(C.COLOR_BRASS_BRIGHT)))
         self.setPen(QPen(QColor(C.COLOR_BG_DARKEST), 1))
         self.setZValue(1000)
-        self.setCursor(QCursor(Qt.PointingHandCursor))
         self.setAcceptedMouseButtons(Qt.NoButton)
 
     def reposition(self) -> None:

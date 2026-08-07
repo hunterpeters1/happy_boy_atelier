@@ -37,18 +37,31 @@ class AddItemCommand(QUndoCommand):
 
 
 class DeleteItemCommand(QUndoCommand):
-    """Mirror image of AddItemCommand — removes on redo, restores on undo."""
+    """Mirror image of AddItemCommand — removes on redo, restores on undo
+    at its exact original stacking position (not just re-added, which
+    `group.add_existing()` would otherwise append to the end of —
+    silently moving a deleted-then-undone item to the front of its
+    stacking band/print order). `group` must additionally expose
+    `index_of(item)` (see layers/stacking_mixin.py, mixed into every
+    layer group) alongside `add_existing`/`remove_item`.
+    """
 
     def __init__(self, group, item, label: str = "Delete item"):
         super().__init__(label)
         self._group = group
         self._item = item
+        self._index: int | None = None
 
     def redo(self) -> None:
+        # Captured fresh on every redo (not just once in __init__) so a
+        # delete/undo/redo cycle interleaved with other reordering still
+        # restores to wherever the item actually was immediately before
+        # this specific removal.
+        self._index = self._group.index_of(self._item)
         self._group.remove_item(self._item)
 
     def undo(self) -> None:
-        self._group.add_existing(self._item)
+        self._group.add_existing(self._item, self._index)
 
 
 class TransformCommand(QUndoCommand):
@@ -162,6 +175,36 @@ class SetPerspectiveModeCommand(QUndoCommand):
         for vp, pos in zip(self._layer.vps, self._old_vp_positions):
             vp.setPos(pos)
         self._layer.grid.update()
+
+
+class ReorderItemCommand(QUndoCommand):
+    """Moves `item` one step forward (prints closer to the top of its own
+    layer's stack) or backward. `group` must expose
+    move_item_forward(item)/move_item_backward(item) — see
+    ReferenceLayerGroup, CompositionLayerGroup, LightingLayerGroup. Forward
+    and backward are exact inverses of each other (each is an adjacent-
+    element swap within the group's internal order, which is its own
+    inverse), so undo is just the opposite move rather than needing to
+    snapshot and restore the whole order.
+    """
+
+    def __init__(self, group, item, forward: bool):
+        super().__init__("Bring forward" if forward else "Send backward")
+        self._group = group
+        self._item = item
+        self._forward = forward
+
+    def redo(self) -> None:
+        if self._forward:
+            self._group.move_item_forward(self._item)
+        else:
+            self._group.move_item_backward(self._item)
+
+    def undo(self) -> None:
+        if self._forward:
+            self._group.move_item_backward(self._item)
+        else:
+            self._group.move_item_forward(self._item)
 
 
 class SetPropertyCommand(QUndoCommand):

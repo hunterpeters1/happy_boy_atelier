@@ -63,7 +63,7 @@ class HorizonLineItem(InteractiveItem):
         super().__init__()
         self._canvas_w = canvas_w
         self._line_width = GRID_LINE_WIDTH_DEFAULT
-        self.setCursor(Qt.SizeVerCursor)
+        self.set_normal_cursor(Qt.SizeVerCursor)
         self.setZValue(5)
 
     def set_canvas_width(self, w: float) -> None:
@@ -100,7 +100,7 @@ class VanishingPointItem(InteractiveItem):
         self.vp_id = vp_id or str(uuid.uuid4())
         self.label = label
         self._line_width = GRID_LINE_WIDTH_DEFAULT
-        self.setCursor(Qt.PointingHandCursor)
+        self.set_normal_cursor(Qt.PointingHandCursor)
         self.setZValue(6)
 
     def set_line_width(self, width: float) -> None:
@@ -187,8 +187,11 @@ class PerspectiveLayerGroup(QGraphicsItemGroup):
         self.addToGroup(self.grid)
         self.horizon.yChanged.connect(self.grid.update)
         self.set_mode(PerspectiveMode.ONE_POINT)
-        # Visible by default so it matches the "Visible" checkbox state in
-        # the Layers panel; the artist can hide it with one click.
+        # Hidden by default — a brand-new project should show a blank
+        # canvas, not a horizon line + grid the artist never asked for.
+        # The "Visible" checkbox in the Layers panel reads isVisible()
+        # directly, so it correctly starts unchecked to match.
+        self.setVisible(False)
 
     def _vp_positions(self) -> list[QPointF]:
         return [vp.pos() for vp in self.vps]

@@ -33,9 +33,11 @@ def apply_theme(app: QApplication) -> None:
     pal.setColor(QPalette.Disabled, QPalette.WindowText, QColor(C.COLOR_INK_DIM))
     app.setPalette(pal)
 
-    # 9pt read as noticeably small for a desktop app default; 10pt keeps
-    # the panels dense without asking for a squint.
-    font = QFont(C.FONT_FAMILY_UI, 10)
+    # 9pt read as noticeably small for a desktop app default; 10pt kept
+    # the panels dense without asking for a squint, but still read a
+    # touch small once paired with the tight field padding below — 11pt
+    # is the next step in that same "readable but still dense" direction.
+    font = QFont(C.FONT_FAMILY_UI, 11)
     app.setFont(font)
 
     app.setStyleSheet(_stylesheet())

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from .. import constants as C
 from ..canvas.interactive_item import InteractiveItem
+from .stacking_mixin import StackedLayerMixin
 
 MARKER_R_PRIMARY = 11
 MARKER_R_SECONDARY = 8
@@ -26,7 +27,7 @@ class FocalPointItem(InteractiveItem):
         self.node_id = node_id or str(uuid.uuid4())
         self.kind = kind  # "primary" | "secondary"
         self.setZValue(10)
-        self.setCursor(Qt.PointingHandCursor)
+        self.set_normal_cursor(Qt.PointingHandCursor)
 
     def _radius(self) -> float:
         return MARKER_R_PRIMARY if self.kind == "primary" else MARKER_R_SECONDARY
@@ -71,7 +72,7 @@ class MovementLineItem(InteractiveItem):
         self.line_id = line_id or str(uuid.uuid4())
         self._points = points or [QPointF(0, 0), QPointF(60, 0)]
         self.setZValue(9)
-        self.setCursor(Qt.PointingHandCursor)
+        self.set_normal_cursor(Qt.PointingHandCursor)
 
     def boundingRect(self) -> QRectF:
         xs = [p.x() for p in self._points]
@@ -152,7 +153,7 @@ class NoteItem(InteractiveItem):
         self.note_id = note_id or str(uuid.uuid4())
         self._color = color
         self.setZValue(11)
-        self.setCursor(Qt.PointingHandCursor)
+        self.set_normal_cursor(Qt.PointingHandCursor)
 
         self._text_item = _NoteTextItem(text, self)
         self._text_item.setDefaultTextColor(QColor(C.COLOR_INK))
@@ -232,7 +233,25 @@ class NoteItem(InteractiveItem):
         return item
 
 
-class CompositionLayerGroup(QGraphicsItemGroup):
+class CompositionLayerGroup(StackedLayerMixin, QGraphicsItemGroup):
+    """can_move_forward()/can_move_backward()/move_item_forward()/
+    move_item_backward()/remove_item()/index_of() come from
+    StackedLayerMixin (stacking_mixin.py) — this class supplies
+    _bucket_for() and _reassign_z() below.
+    """
+
+    # Stacking bands, widest gap first: movement lines always print under
+    # focal points, which always print under notes (so a note's "i" stays
+    # legible even parked on top of a marker) — that hierarchy is fixed,
+    # matching each item class's own historical setZValue() call. What the
+    # Project Panel's up/down buttons control is the order *within* one
+    # band (e.g. which of two overlapping notes prints on top of the
+    # other) — see _reassign_z().
+    _Z_BAND_MOVEMENT = 9.0
+    _Z_BAND_FOCAL = 10.0
+    _Z_BAND_NOTE = 11.0
+    _Z_STEP = 0.01
+
     def __init__(self):
         super().__init__()
         self.setHandlesChildEvents(False)
@@ -240,33 +259,49 @@ class CompositionLayerGroup(QGraphicsItemGroup):
         self.movement_lines: list[MovementLineItem] = []
         self.notes: list[NoteItem] = []
 
-    def add_existing(self, item) -> None:
+    def add_existing(self, item, index: int | None = None) -> None:
         """Add an already-constructed item, routing it to the right
-        bookkeeping bucket by type. This is the single choke point both the
-        convenience add_X() methods below and AddItemCommand's redo() go
-        through, so an undo'd delete restores an item exactly the same way
-        a fresh add would place it.
+        bookkeeping bucket by type (via _bucket_for(), which is
+        type-based so it works before `item` is in any bucket). This is
+        the single choke point both the convenience add_X() methods
+        below and AddItemCommand's redo() go through, so an undo'd
+        delete restores an item exactly the same way a fresh add would
+        place it. `index`: insert at this position within the bucket
+        instead of appending — used by DeleteItemCommand.undo()
+        (undo_commands.py) to restore an item's exact original stacking
+        position.
         """
-        if isinstance(item, FocalPointItem):
-            bucket = self.focal_points
-        elif isinstance(item, MovementLineItem):
-            bucket = self.movement_lines
-        elif isinstance(item, NoteItem):
-            bucket = self.notes
-        else:
+        bucket = self._bucket_for(item)
+        if bucket is None:
             raise TypeError(f"CompositionLayerGroup cannot host {type(item).__name__}")
         self.addToGroup(item)
         if item not in bucket:
-            bucket.append(item)
+            if index is None or index >= len(bucket):
+                bucket.append(item)
+            else:
+                bucket.insert(index, item)
+        self._reassign_z()
+
+    def _bucket_for(self, item):
+        if isinstance(item, FocalPointItem):
+            return self.focal_points
+        if isinstance(item, MovementLineItem):
+            return self.movement_lines
+        if isinstance(item, NoteItem):
+            return self.notes
+        return None
+
+    def _reassign_z(self) -> None:
+        for i, item in enumerate(self.movement_lines):
+            item.setZValue(self._Z_BAND_MOVEMENT + i * self._Z_STEP)
+        for i, item in enumerate(self.focal_points):
+            item.setZValue(self._Z_BAND_FOCAL + i * self._Z_STEP)
+        for i, item in enumerate(self.notes):
+            item.setZValue(self._Z_BAND_NOTE + i * self._Z_STEP)
 
     def add_focal_point(self, kind: str, pos: QPointF) -> FocalPointItem:
         item = FocalPointItem(kind)
         item.setPos(pos)
-        self.add_existing(item)
-        return item
-
-    def add_movement_line(self, points: list[QPointF]) -> MovementLineItem:
-        item = MovementLineItem(points)
         self.add_existing(item)
         return item
 
@@ -278,14 +313,6 @@ class CompositionLayerGroup(QGraphicsItemGroup):
 
     def all_items(self):
         return [*self.focal_points, *self.movement_lines, *self.notes]
-
-    def remove_item(self, item) -> None:
-        for bucket in (self.focal_points, self.movement_lines, self.notes):
-            if item in bucket:
-                bucket.remove(item)
-        self.removeFromGroup(item)
-        if item.scene():
-            item.scene().removeItem(item)
 
     def clear(self) -> None:
         for item in self.all_items():
@@ -316,3 +343,4 @@ class CompositionLayerGroup(QGraphicsItemGroup):
             item = NoteItem.from_dict(n, color=C.COLOR_BRASS)
             self.addToGroup(item)
             self.notes.append(item)
+        self._reassign_z()

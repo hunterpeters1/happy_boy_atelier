@@ -4,18 +4,30 @@ placed item — not just reference images — is a named, selectable row with
 inline visibility/lock toggles, plus a live search filter across the
 whole painting.
 
-Two things the redesign dossier's vision calls for are deliberately not
-in this pass: drag-to-reorder within a layer (none of the layer group
-classes expose a reorder operation yet — faking the drag visuals with no
-backend effect would be worse than not having it) and true hover-reveal
-icons (QTreeWidget doesn't support per-row hover visibility cheaply
-without a custom item delegate; the eye/lock icons are small and always
+Reorder-within-a-layer (which item prints on top of which other one) is
+per-row up/down buttons, not drag-and-drop: QTreeWidget's built-in
+InternalMove drag would need a delegate that both blocks drags across
+layer sections and translates a drop index back into a layer group's own
+bookkeeping (ReferenceLayerGroup._items, or a typed bucket for
+composition/lighting) — a real drag rewrite, not this pass. The buttons
+call ReferenceLayerGroup.move_item_forward()/move_item_backward() and
+the equivalents on CompositionLayerGroup/LightingLayerGroup (each undoable
+via ReorderItemCommand). True hover-reveal icons are also still not in
+(QTreeWidget doesn't support per-row hover visibility cheaply without a
+custom item delegate; the eye/lock/reorder icons are small and always
 visible instead).
+
+Item rows list front-to-back, top to bottom — the row order matches print
+order (top row = prints on top), which is why _populate_reference() etc.
+below iterate each layer group's item list *reversed*: the group's own
+list is stored back-to-front (index 0 = bottom) since z-values are
+assigned as ascending list-index (see e.g. ReferenceLayerGroup._reassign_z).
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -45,6 +57,9 @@ from ..layers.lighting_layer import LightSourceItem, DirectionArrowItem
 from ..layers.perspective_layer import VanishingPointItem, HorizonLineItem
 
 _ROLE_ITEM = Qt.UserRole
+# Compact row-button icon size — bumped alongside the toolbar/tree icon
+# bumps below for legibility; was 15/16px.
+_ROW_ICON_PX = 17
 
 
 def _row_icon_and_label(item) -> tuple[str, str]:
@@ -69,24 +84,51 @@ def _row_icon_and_label(item) -> tuple[str, str]:
 
 
 class _RowButtons(QWidget):
-    """The eye/lock toggle pair used as column 1's item widget for both
+    """The eye/lock toggle pair (plus, for reorderable item rows, an
+    up/down stacking-order pair) used as column 1's item widget for both
     layer-header rows and individual item rows.
     """
 
     visibility_toggled = Signal(bool)
     lock_toggled = Signal(bool)
+    move_forward_clicked = Signal()
+    move_backward_clicked = Signal()
 
     def __init__(self, *, visible: bool, locked: bool, show_visibility: bool = True,
-                 show_lock: bool = True, parent=None):
+                 show_lock: bool = True, can_move_forward: bool | None = None,
+                 can_move_backward: bool | None = None, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 0, 2, 0)
         layout.setSpacing(2)
         layout.addStretch(1)
+        # Reorder buttons only appear when the caller passes real
+        # can_move_forward/backward booleans — None means "this item's
+        # layer group doesn't support reordering" (perspective/guides).
+        if can_move_forward is not None or can_move_backward is not None:
+            self.up_btn = QToolButton()
+            self.up_btn.setProperty("role", "compact")
+            self.up_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
+            self.up_btn.setIcon(icons.icon("reorder_up"))
+            self.up_btn.setAutoRaise(True)
+            self.up_btn.setToolTip("Bring forward (prints closer to the top)")
+            self.up_btn.setEnabled(bool(can_move_forward))
+            self.up_btn.clicked.connect(self.move_forward_clicked)
+            layout.addWidget(self.up_btn)
+
+            self.down_btn = QToolButton()
+            self.down_btn.setProperty("role", "compact")
+            self.down_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
+            self.down_btn.setIcon(icons.icon("reorder_down"))
+            self.down_btn.setAutoRaise(True)
+            self.down_btn.setToolTip("Send backward (prints closer to the bottom)")
+            self.down_btn.setEnabled(bool(can_move_backward))
+            self.down_btn.clicked.connect(self.move_backward_clicked)
+            layout.addWidget(self.down_btn)
         if show_visibility:
             self.eye_btn = QToolButton()
             self.eye_btn.setProperty("role", "compact")
-            self.eye_btn.setIconSize(QSize(15, 15))
+            self.eye_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
             self.eye_btn.setCheckable(True)
             self.eye_btn.setChecked(visible)
             self.eye_btn.setIcon(icons.icon("eye"))
@@ -97,7 +139,7 @@ class _RowButtons(QWidget):
         if show_lock:
             self.lock_btn = QToolButton()
             self.lock_btn.setProperty("role", "compact")
-            self.lock_btn.setIconSize(QSize(15, 15))
+            self.lock_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
             self.lock_btn.setCheckable(True)
             self.lock_btn.setChecked(locked)
             self.lock_btn.setIcon(icons.icon("lock" if locked else "unlock"))
@@ -139,7 +181,12 @@ class LayersPanel(QWidget):
 
         search_row = QHBoxLayout()
         search_icon = QLabel()
-        search_icon.setPixmap(icons.icon("search", 14).pixmap(14, 14))
+        search_icon.setPixmap(icons.icon("search", 16).pixmap(16, 16))
+        # The one icon in this panel that lives outside self.tree, so it's
+        # not covered by refresh_structure()'s full rebuild on a theme
+        # switch (see MainWindow._refresh_icon_colors()) — register it
+        # individually.
+        icons.register(search_icon, lambda obj, ic: obj.setPixmap(ic.pixmap(16, 16)), "search")
         search_row.addWidget(search_icon)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search this painting…")
@@ -151,6 +198,7 @@ class LayersPanel(QWidget):
         self.tree.setHeaderHidden(True)
         self.tree.setColumnCount(2)
         self.tree.setIndentation(14)
+        self.tree.setIconSize(QSize(18, 18))
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         # NOT uniform: rows genuinely vary — most are a single icon+label,
         # but the tool-activation rows and the perspective settings form
@@ -161,7 +209,10 @@ class LayersPanel(QWidget):
         self.tree.setUniformRowHeights(False)
         self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.Fixed)
-        self.tree.setColumnWidth(1, 56)
+        # Wide enough for the four-button item rows (reorder up/down + eye
+        # + lock); layer-header rows only use two of these and stay
+        # right-aligned via _RowButtons' leading stretch.
+        self.tree.setColumnWidth(1, 108)
         self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
         outer.addWidget(self.tree, 1)
 
@@ -224,9 +275,13 @@ class LayersPanel(QWidget):
         row = QTreeWidgetItem(self.tree)
         row.setIcon(0, icons.icon(icon_name))
         row.setText(0, C.LAYER_LABELS[kind])
-        font = row.font(0)
-        font.setBold(True)
-        row.setFont(0, font)
+        # An explicit absolute size, not "current size + 2" — QTreeWidgetItem
+        # .font(0) returns a Qt-default-constructed QFont (whatever the
+        # platform default point size happens to be, not the app-wide
+        # QFont(C.FONT_FAMILY_UI, 11) set in theme.py) until a font has
+        # actually been assigned, so a relative bump silently based itself
+        # on the wrong starting size.
+        row.setFont(0, QFont(C.FONT_FAMILY_UI, 13, QFont.Bold))
         row.setExpanded(self._expanded_default.get(kind, True))
         self._layer_rows[kind] = row
 
@@ -238,7 +293,14 @@ class LayersPanel(QWidget):
 
         populate_fn(row)
 
-    def _add_item_row(self, parent: QTreeWidgetItem, obj) -> QTreeWidgetItem:
+    def _add_item_row(self, parent: QTreeWidgetItem, obj, group=None) -> QTreeWidgetItem:
+        """`group` is the owning layer group if (and only if) it supports
+        reordering (ReferenceLayerGroup/CompositionLayerGroup/
+        LightingLayerGroup all expose can_move_forward()/backward() and
+        move_item_forward()/backward()) — pass None to omit the up/down
+        buttons entirely (perspective's horizon/vanishing points, which
+        aren't freely reorderable).
+        """
         icon_name, label = _row_icon_and_label(obj)
         row = QTreeWidgetItem(parent)
         row.setIcon(0, icons.icon(icon_name))
@@ -249,11 +311,26 @@ class LayersPanel(QWidget):
         row.setData(0, _ROLE_ITEM, obj)
         self._row_for_obj[id(obj)] = row
 
-        buttons = _RowButtons(visible=obj.isVisible(), locked=obj.is_locked())
+        can_fwd = group.can_move_forward(obj) if group is not None else None
+        can_back = group.can_move_backward(obj) if group is not None else None
+        buttons = _RowButtons(
+            visible=obj.isVisible(), locked=obj.is_locked(),
+            can_move_forward=can_fwd, can_move_backward=can_back,
+        )
         buttons.visibility_toggled.connect(obj.setVisible)
         buttons.lock_toggled.connect(obj.set_locked)
+        if group is not None:
+            buttons.move_forward_clicked.connect(lambda o=obj, g=group: self._reorder_item(g, o, True))
+            buttons.move_backward_clicked.connect(lambda o=obj, g=group: self._reorder_item(g, o, False))
         self._set_row_widget(row, 1, buttons)
         return row
+
+    def _reorder_item(self, group, item, forward: bool) -> None:
+        can = group.can_move_forward(item) if forward else group.can_move_backward(item)
+        if not can:
+            return
+        from ..canvas.undo_commands import ReorderItemCommand
+        self.scene.undo_stack.push(ReorderItemCommand(group, item, forward))
 
     def _add_tool_row(self, parent: QTreeWidgetItem, tools: list[tuple[str, str, str]]) -> None:
         """tools: list of (tool_id, icon_name, tooltip)."""
@@ -287,7 +364,7 @@ class LayersPanel(QWidget):
         layout.setContentsMargins(0, 2, 0, 2)
         add_btn = QToolButton()
         add_btn.setProperty("role", "compact")
-        add_btn.setIconSize(QSize(16, 16))
+        add_btn.setIconSize(QSize(18, 18))
         add_btn.setIcon(icons.icon("import"))
         add_btn.setAutoRaise(True)
         add_btn.setToolTip("Import reference image(s)…")
@@ -303,8 +380,12 @@ class LayersPanel(QWidget):
         layout.addStretch(1)
         self._set_row_widget(row, 0, widget)
 
-        for image in self.scene.reference_layer.items():
-            self._add_item_row(parent, image)
+        # Reversed: the layer group's own list is back-to-front (index 0 =
+        # bottom of the stack), but the row order here should read
+        # top-of-panel = top-of-stack, matching every other layered-editor
+        # convention and the up/down buttons' "forward" = "up" mapping.
+        for image in reversed(self.scene.reference_layer.items()):
+            self._add_item_row(parent, image, self.scene.reference_layer)
 
     # -- Composition ------------------------------------------------------
     def _populate_composition(self, parent: QTreeWidgetItem) -> None:
@@ -315,12 +396,12 @@ class LayersPanel(QWidget):
             ("note_comp", "note", "Add note"),
         ])
         layer = self.scene.composition_layer
-        for fp in layer.focal_points:
-            self._add_item_row(parent, fp)
-        for line in layer.movement_lines:
-            self._add_item_row(parent, line)
-        for note in layer.notes:
-            self._add_item_row(parent, note)
+        for fp in reversed(layer.focal_points):
+            self._add_item_row(parent, fp, layer)
+        for line in reversed(layer.movement_lines):
+            self._add_item_row(parent, line, layer)
+        for note in reversed(layer.notes):
+            self._add_item_row(parent, note, layer)
 
     # -- Perspective --------------------------------------------------------
     def _populate_perspective(self, parent: QTreeWidgetItem) -> None:
@@ -458,12 +539,12 @@ class LayersPanel(QWidget):
             ("note_light", "note", "Add note"),
         ])
         layer = self.scene.lighting_layer
-        for source in layer.sources:
-            self._add_item_row(parent, source)
-        for arrow in layer.arrows:
-            self._add_item_row(parent, arrow)
-        for note in layer.notes:
-            self._add_item_row(parent, note)
+        for source in reversed(layer.sources):
+            self._add_item_row(parent, source, layer)
+        for arrow in reversed(layer.arrows):
+            self._add_item_row(parent, arrow, layer)
+        for note in reversed(layer.notes):
+            self._add_item_row(parent, note, layer)
 
     # -- Guides -----------------------------------------------------------
     def _populate_guides(self, parent: QTreeWidgetItem) -> None:
@@ -514,7 +595,7 @@ class LayersPanel(QWidget):
     def _make_tool_button(self, tool: str, icon_name: str, tooltip: str) -> QToolButton:
         btn = QToolButton()
         btn.setProperty("role", "compact")
-        btn.setIconSize(QSize(16, 16))
+        btn.setIconSize(QSize(18, 18))
         btn.setIcon(icons.icon(icon_name))
         btn.setCheckable(True)
         btn.setAutoRaise(True)

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import math
 import uuid
-from dataclasses import dataclass
 
 from PySide6.QtCore import QBuffer, QIODevice, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap, QTransform
@@ -16,15 +15,17 @@ from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsItemGroup,
     QGraphicsRectItem,
-    QStyle,
 )
 
 from .. import constants as C
 from ..canvas.handle_frame import HandleFrame, HANDLE_PX, MIN_SCALE, MAX_SCALE
 from ..canvas.interactive_item import InteractiveItem
 from ..canvas.resize_math import compute_corner_resize
+from .stacking_mixin import StackedLayerMixin
 
-CROP_HANDLE_PX = 10
+# Was 10 — bumped for a more forgiving grab, same reasoning as
+# HANDLE_HIT_RADIUS_PX below.
+CROP_HANDLE_PX = 14
 ROTATION_SNAP_DEG = 15.0
 # Screen-pixel tolerance for position snapping — converted to scene units
 # per-drag via the current view zoom, so the catch radius feels the same
@@ -39,7 +40,38 @@ SNAP_TOLERANCE_PX = 8.0
 # image rather than resizing it — a known Qt limitation with hit-testing
 # ItemIgnoresTransformations children over a transformed parent. The
 # squares in handle_frame.py are now purely decorative (NoButton).
-HANDLE_HIT_RADIUS_PX = HANDLE_PX / 2 + 6
+HANDLE_HIT_RADIUS_PX = HANDLE_PX / 2 + 10
+# Fixed scene-unit pad added to boundingRect() around the corner handles
+# while active (see boundingRect() below) so Qt still delivers the mouse
+# press to this item when a click lands just outside the exact image
+# edge, where the visual handle actually is. Deliberately not derived
+# from HANDLE_HIT_RADIUS_PX (a *device-pixel* radius) or the current
+# view zoom: boundingRect() must stay stable without a matching
+# prepareGeometryChange() on every zoom change, so this is a generous
+# flat scene-unit value rather than a pixel-exact one — the precise
+# click tolerance is still enforced by _hit_test_handle() below.
+HANDLE_CLICK_MARGIN_SCENE = 30.0
+# Longest-edge cap (px) for the interactive display proxy — see
+# ReferenceImageItem._get_display_pixmap(). 2000px comfortably exceeds
+# typical on-screen display size even at high zoom on a 4K monitor, while
+# staying far below a modern camera photo's native resolution.
+MAX_DISPLAY_DIM = 2000
+# Longest-edge cap (px) for Study Blur's own working resolution — see
+# ReferenceImageItem._get_processed_display_pixmap(). Deliberately smaller
+# than MAX_DISPLAY_DIM: measured numpy cost scales with pixel count, and
+# processing at 2000px took the better part of a second per slider
+# adjustment. ~900px keeps a single recompute in the ~100ms range, and
+# the reduced resolution isn't a visible quality loss for a blur effect
+# specifically, which has no fine detail left to lose.
+BLUR_WORKING_DIM = 900
+
+
+# tl/br share a diagonal, tr/bl share the other — same convention as
+# ReferenceImageItem.hoverMoveEvent()'s corner-resize cursors.
+_CROP_CORNER_CURSORS = {
+    "tl": Qt.SizeFDiagCursor, "br": Qt.SizeFDiagCursor,
+    "tr": Qt.SizeBDiagCursor, "bl": Qt.SizeBDiagCursor,
+}
 
 
 class _CropHandle(QGraphicsRectItem):
@@ -56,6 +88,9 @@ class _CropHandle(QGraphicsRectItem):
         self.setPen(QPen(QColor(C.COLOR_BG_DARKEST), 1))
         self.setZValue(1001)
         self.setAcceptedMouseButtons(Qt.LeftButton)
+        # Previously unset entirely — the smallest, least-forgiving
+        # handle in the app had zero hover cue at all.
+        self.setCursor(_CROP_CORNER_CURSORS[corner])
 
     def mouseMoveEvent(self, event):
         local = self._item.mapFromScene(event.scenePos())
@@ -70,7 +105,8 @@ class ReferenceImageItem(InteractiveItem):
     """A single reference photo/object placed on the drafting table."""
 
     def __init__(self, image_id: str, source_pixmap: QPixmap, base_w: float, base_h: float,
-                 crop: QRect | None = None, display_name: str | None = None, parent=None):
+                 crop: QRect | None = None, display_name: str | None = None,
+                 original_format: str | None = None, original_file_size: int | None = None, parent=None):
         super().__init__(parent)
         self.image_id = image_id
         # The Project Panel lists this by display_name rather than a
@@ -78,6 +114,11 @@ class ReferenceImageItem(InteractiveItem):
         # image_id (still unique, just not human-friendly) for projects
         # saved before this field existed.
         self.display_name = display_name or image_id
+        # Captured at import time for the Properties panel's info block.
+        # None for images from projects saved before this field existed
+        # (displayed as "Unknown" rather than guessed).
+        self.original_format = original_format
+        self.original_file_size = original_file_size
         self._source_pixmap = source_pixmap
         self._base_w = base_w
         self._base_h = base_h
@@ -102,11 +143,35 @@ class ReferenceImageItem(InteractiveItem):
         self._handle_press_scale = (1.0, 1.0)
         self._handle_press_rotation = 0.0
         self._handle_anchor_scene = QPointF()
+        self._handle_center_scene = QPointF()
+        self._handle_press_mouse_angle = 0.0
         # True only while a plain body drag (not a handle drag, not a
         # programmatic setPos from undo/redo, batch align, etc.) is in
         # progress — itemChange() only snaps position during this window,
         # so restoring an exact stored position is never silently nudged.
         self._body_dragging = False
+
+        # Cached downscaled proxy for interactive on-screen painting — see
+        # _get_display_pixmap()/paint(). Keeps drag/resize smooth on large
+        # camera photos without touching export/thumbnail quality, which
+        # always draw straight from _source_pixmap instead (whenever
+        # scene.rendering_for_export is set — see paint()).
+        self._display_pixmap: QPixmap | None = None
+        self._display_pixmap_crop: QRect | None = None
+        self._display_pixmap_source_rect = QRectF()
+
+        # Study Blur — see study_blur.py. 0 means "no effect" on both, the
+        # default for every image unless the artist turns it on, and the
+        # back-compat default for every .atelier file saved before this
+        # feature existed (from_dict()). Processed-pixmap cache is keyed
+        # on (blur, clarity, crop) so it only regenerates when one of
+        # those actually changes, not on every repaint.
+        self._blur_amount = 0.0
+        self._line_clarity = 0.0
+        self._processed_pixmap: QPixmap | None = None
+        self._processed_cache_key: tuple | None = None
+        # See set_defer_blur_refresh().
+        self._defer_blur_refresh = False
 
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.OpenHandCursor)
@@ -121,9 +186,126 @@ class ReferenceImageItem(InteractiveItem):
         frac_h = self._crop.height() / sh
         return (self._base_w * frac_w, self._base_h * frac_h)
 
-    def boundingRect(self) -> QRectF:
+    def _image_rect(self) -> QRectF:
         w, h = self.natural_size()
         return QRectF(-w / 2, -h / 2, w, h)
+
+    def _get_display_pixmap(self) -> tuple[QPixmap, QRectF]:
+        """Cached downscaled proxy of the (already-cropped) source pixmap
+        for interactive on-screen painting only — see paint(). A
+        multi-megapixel camera photo resampled at full resolution on
+        every single repaint frame was the main cost behind sluggish
+        drag/resize; this caps what actually gets resampled each frame to
+        MAX_DISPLAY_DIM regardless of the source photo's real size.
+        Regenerated only when the crop changes (compared against the
+        cached crop below) — never touches _source_pixmap itself, so
+        export/thumbnail rendering (which draws _source_pixmap directly
+        whenever scene.rendering_for_export is set — see paint()) is
+        completely unaffected.
+        """
+        if self._display_pixmap is not None and self._display_pixmap_crop == self._crop:
+            return self._display_pixmap, self._display_pixmap_source_rect
+
+        cropped_w, cropped_h = self._crop.width(), self._crop.height()
+        longest = max(cropped_w, cropped_h, 1)
+        if longest <= MAX_DISPLAY_DIM:
+            # Already small enough — draw straight from the source with
+            # the normal crop rect rather than allocating a copy that
+            # would just be the same size.
+            proxy = self._source_pixmap
+            source_rect = QRectF(self._crop)
+        else:
+            scale = MAX_DISPLAY_DIM / longest
+            cropped = self._source_pixmap.copy(self._crop)
+            proxy = cropped.scaled(
+                max(1, round(cropped_w * scale)), max(1, round(cropped_h * scale)),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation,
+            )
+            source_rect = QRectF(0, 0, proxy.width(), proxy.height())
+
+        self._display_pixmap = proxy
+        self._display_pixmap_crop = QRect(self._crop)
+        self._display_pixmap_source_rect = source_rect
+        return self._display_pixmap, self._display_pixmap_source_rect
+
+    def _get_processed_display_pixmap(self) -> tuple[QPixmap, QRectF]:
+        """Whatever Study Blur result is currently cached — paint() calls
+        this unconditionally once blur/clarity is nonzero, but it does
+        NOT itself decide when to recompute for a changed blur_amount()/
+        line_clarity() (see _refresh_processed_pixmap() for why: that's
+        real numpy work, and Qt schedules a repaint on every single
+        slider tick during a drag — recomputing here on every one of
+        those would defeat the Properties panel's debouncing entirely,
+        since it'd happen via the normal paint cycle regardless). A crop
+        change (or simply never having computed anything yet) is the one
+        case handled eagerly here, since that's an infrequent, deliberate
+        action, not a continuous-drag scenario.
+        """
+        proxy, source_rect = self._get_display_pixmap()
+        crop_now = QRect(self._crop)
+        never_computed = self._processed_pixmap is None or self._processed_cache_key is None
+        crop_changed = not never_computed and self._processed_cache_key[2] != crop_now
+        if never_computed or crop_changed:
+            self._refresh_processed_pixmap()
+        return self._processed_pixmap, source_rect
+
+    def _refresh_processed_pixmap(self) -> None:
+        """Actually run the Study Blur numpy pipeline against the current
+        blur_amount()/line_clarity()/crop and cache the result. Called
+        eagerly by _get_processed_display_pixmap() above on first use or
+        a crop change, and explicitly by the Properties panel's debounced
+        preview timer / slider-release handler for ordinary blur/clarity
+        adjustments — see PropertiesPanel._apply_blur_preview().
+
+        Processes at BLUR_WORKING_DIM, smaller than the crisp
+        MAX_DISPLAY_DIM proxy, then scales the result back up to match
+        it: measured numpy cost scales roughly with pixel count, and a
+        2000px-class bitmap took the better part of a second per call —
+        clearly not "smooth." Working at a smaller size and upscaling
+        isn't a visible quality compromise here specifically *because*
+        the output is a blur — it has no fine high-frequency detail left
+        for the resolution cut to lose.
+        """
+        proxy, _ = self._get_display_pixmap()
+        from ..canvas.study_blur import apply_study_effect
+        work_pixmap = proxy
+        longest = max(proxy.width(), proxy.height(), 1)
+        if longest > BLUR_WORKING_DIM:
+            scale = BLUR_WORKING_DIM / longest
+            work_pixmap = proxy.scaled(
+                max(1, round(proxy.width() * scale)), max(1, round(proxy.height() * scale)),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation,
+            )
+        processed_image = apply_study_effect(work_pixmap.toImage(), self._blur_amount, self._line_clarity)
+        processed_pixmap = QPixmap.fromImage(processed_image)
+        if processed_pixmap.size() != proxy.size():
+            processed_pixmap = processed_pixmap.scaled(
+                proxy.width(), proxy.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+        self._processed_pixmap = processed_pixmap
+        self._processed_cache_key = (self._blur_amount, self._line_clarity, QRect(self._crop))
+
+    def boundingRect(self) -> QRectF:
+        # Must cover the resize/rotate handles too, not just the image
+        # pixels: the rotate handle sits well above the top edge (see
+        # HandleFrame._RotateHandle.reposition()) and the corner handles'
+        # grab radius (HANDLE_HIT_RADIUS_PX) extends past the corners. Qt
+        # only ever delivers a mouse press to this item if the click point
+        # falls inside boundingRect()/shape() — a tighter rect here meant
+        # clicks on the handles (especially the rotate handle, entirely
+        # outside the image rect) silently missed this item and fell
+        # through to an empty-canvas click, which clears the selection.
+        # That's what made the rotate handle appear dead and the corner
+        # handles flaky, and made dragging near an edge look like the
+        # selection randomly dropping/"jumping". paint() must keep using
+        # _image_rect(), not this, or the pixmap would stretch to fill it.
+        rect = self._image_rect()
+        if self._ui_active and not self._locked and not self._crop_mode:
+            _, h = self.natural_size()
+            top_margin = max(20.0, h * 0.18) + HANDLE_CLICK_MARGIN_SCENE
+            side_margin = HANDLE_CLICK_MARGIN_SCENE
+            rect = rect.adjusted(-side_margin, -top_margin, side_margin, side_margin)
+        return rect
 
     def scale_x(self) -> float:
         return self._scale_x
@@ -152,6 +334,40 @@ class ReferenceImageItem(InteractiveItem):
         self._scale_x = sx
         self._scale_y = sy
         self.setTransform(QTransform().scale(sx, sy))
+
+    # -- Study Blur (see canvas/study_blur.py) -----------------------------
+    def blur_amount(self) -> float:
+        return self._blur_amount
+
+    def set_blur_amount(self, value: float) -> None:
+        self._blur_amount = max(0.0, min(100.0, value))
+        if not self._defer_blur_refresh:
+            self._refresh_processed_pixmap()
+        self.update()
+
+    def line_clarity(self) -> float:
+        return self._line_clarity
+
+    def set_line_clarity(self, value: float) -> None:
+        self._line_clarity = max(0.0, min(100.0, value))
+        if not self._defer_blur_refresh:
+            self._refresh_processed_pixmap()
+        self.update()
+
+    def set_defer_blur_refresh(self, defer: bool) -> None:
+        """Suppresses the immediate _refresh_processed_pixmap() call in
+        set_blur_amount()/set_line_clarity() above while `defer` is True.
+        The Properties panel turns this on for the duration of an active
+        slider drag (see PropertiesPanel._on_blur_field_pressed()) so the
+        expensive numpy recompute only happens via its own debounced
+        timer/release handler, not once per mouse-move tick through the
+        normal setter call. Every other caller of the setters — undo/redo
+        (SetPropertyCommand calls them directly), project load
+        (from_dict()), anything outside a live panel drag — leaves this
+        False, so those always see an up-to-date processed pixmap on the
+        very next paint rather than a stale one from before the change.
+        """
+        self._defer_blur_refresh = defer
 
     def _snapshot_transform(self):
         # Override InteractiveItem's default, which reads Qt's native
@@ -189,7 +405,7 @@ class ReferenceImageItem(InteractiveItem):
             return "rotate"
         return None
 
-    def _begin_handle_drag(self, hit: str) -> None:
+    def _begin_handle_drag(self, hit: str, scene_pos: QPointF) -> None:
         self._active_handle = hit
         w, h = self.natural_size()
         self._handle_half_size = (w / 2.0, h / 2.0)
@@ -200,6 +416,19 @@ class ReferenceImageItem(InteractiveItem):
             sx, sy = int(sx_s), int(sy_s)
             anchor_local = QPointF(-sx * self._handle_half_size[0], -sy * self._handle_half_size[1])
             self._handle_anchor_scene = self.mapToScene(anchor_local)
+        elif hit == "rotate":
+            # Track rotation as a delta from the press-time mouse angle,
+            # both measured around a fixed scene-space center — not via
+            # self.mapFromScene(event.scenePos()) (the old approach),
+            # which maps through the item's *current* rotation. Since
+            # that rotation is itself what each drag step updates, it
+            # created a feedback loop — each step's angle measurement
+            # used the frame the previous step just rotated into — so
+            # the handle oscillated instead of tracking the cursor.
+            self._handle_center_scene = self.mapToScene(QPointF(0, 0))
+            dx = scene_pos.x() - self._handle_center_scene.x()
+            dy = scene_pos.y() - self._handle_center_scene.y()
+            self._handle_press_mouse_angle = math.degrees(math.atan2(dx, -dy))
         self.begin_transform()
 
     def _update_handle_drag(self, event) -> None:
@@ -222,9 +451,11 @@ class ReferenceImageItem(InteractiveItem):
             self.set_scale_xy(new_sx, new_sy)
             self.setPos(QPointF(*new_center))
         elif self._active_handle == "rotate":
-            local = self.mapFromScene(event.scenePos())
-            angle = math.degrees(math.atan2(local.x(), -local.y()))
-            new_rotation = self._handle_press_rotation + angle
+            scene_pos = event.scenePos()
+            dx = scene_pos.x() - self._handle_center_scene.x()
+            dy = scene_pos.y() - self._handle_center_scene.y()
+            current_angle = math.degrees(math.atan2(dx, -dy))
+            new_rotation = self._handle_press_rotation + (current_angle - self._handle_press_mouse_angle)
             if event.modifiers() & Qt.ShiftModifier:
                 new_rotation = round(new_rotation / ROTATION_SNAP_DEG) * ROTATION_SNAP_DEG
             self.setRotation(new_rotation)
@@ -234,7 +465,7 @@ class ReferenceImageItem(InteractiveItem):
         if event.button() == Qt.LeftButton:
             hit = self._hit_test_handle(event.scenePos())
             if hit is not None:
-                self._begin_handle_drag(hit)
+                self._begin_handle_drag(hit, event.scenePos())
                 event.accept()
                 return
             self._body_dragging = True
@@ -256,6 +487,29 @@ class ReferenceImageItem(InteractiveItem):
         self._body_dragging = False
         super().mouseReleaseEvent(event)
 
+    def hoverMoveEvent(self, event) -> None:
+        # Nothing else gives a visual cue that a corner/rotate handle is
+        # actually grabbable right where the cursor is — this is that
+        # cue. Reuses the exact same _hit_test_handle() the mouse press
+        # itself uses, so the cursor never claims a spot is grabbable
+        # that a click there wouldn't actually hit, or vice versa.
+        hit = self._hit_test_handle(event.scenePos())
+        if hit is None:
+            self.setCursor(Qt.ArrowCursor if self._locked else Qt.OpenHandCursor)
+        elif hit == "rotate":
+            self.setCursor(Qt.PointingHandCursor)
+        else:
+            _, sx_s, sy_s = hit.split(":")
+            sx, sy = int(sx_s), int(sy_s)
+            # Matches _CornerScaleHandle's own (never-delivered) cursor
+            # in handle_frame.py — same diagonal-vs-anti-diagonal logic.
+            self.setCursor(Qt.SizeFDiagCursor if sx * sy > 0 else Qt.SizeBDiagCursor)
+        super().hoverMoveEvent(event)
+
+    def hoverLeaveEvent(self, event) -> None:
+        self.setCursor(Qt.ArrowCursor if self._locked else Qt.OpenHandCursor)
+        super().hoverLeaveEvent(event)
+
     # -- lock / visibility ---------------------------------------------
     def set_ui_active(self, active: bool) -> None:
         """Called by CanvasScene off the item_activated signal (see
@@ -263,14 +517,13 @@ class ReferenceImageItem(InteractiveItem):
         the user clicked. Drives the highlight border in paint() and the
         resize/rotate handles.
         """
+        self.prepareGeometryChange()
         self._ui_active = active
         self._handles.set_active(active and not self._locked)
         self.update()
 
-    def is_ui_active(self) -> bool:
-        return self._ui_active
-
     def _on_locked_changed(self, locked: bool) -> None:
+        self.prepareGeometryChange()
         self._handles.set_active(self._ui_active and not locked)
         self.setCursor(Qt.ArrowCursor if locked else Qt.OpenHandCursor)
 
@@ -278,6 +531,7 @@ class ReferenceImageItem(InteractiveItem):
     def enter_crop_mode(self) -> None:
         if self._locked:
             return
+        self.prepareGeometryChange()
         self._crop_mode = True
         w, h = self.natural_size()
         self._crop_preview = QRectF(-w / 2, -h / 2, w, h)
@@ -349,6 +603,7 @@ class ReferenceImageItem(InteractiveItem):
         self.update()
 
     def cancel_crop(self) -> None:
+        self.prepareGeometryChange()
         self._crop_mode = False
         for handle in self._crop_handles:
             handle.setVisible(False)
@@ -409,8 +664,41 @@ class ReferenceImageItem(InteractiveItem):
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        rect = self.boundingRect()
-        painter.drawPixmap(rect, self._source_pixmap, QRectF(self._crop))
+        # Not boundingRect(): that's padded to cover the resize/rotate
+        # handles while active (see boundingRect() above), and drawing the
+        # pixmap into the padded rect would stretch it.
+        rect = self._image_rect()
+        scene = self.scene()
+        if scene is not None and getattr(scene, "rendering_for_export", False):
+            # Set by atelier_io.py around every scene.render() call (PNG/
+            # JPG export, PDF planning sheet, thumbnails) — always
+            # full-resolution here so export quality never depends on
+            # what's cheapest to redraw on screen during a drag. Not
+            # `widget is None`: confirmed that's not a reliable signal for
+            # "is this an export render" (see CanvasScene.__init__). Study
+            # Blur only bakes into the actual export when the artist opts
+            # in via the Export dialog's checkbox (export_study_effect) —
+            # never for thumbnails, which reuse rendering_for_export but
+            # not this second flag (see MainWindow.export_project()).
+            if getattr(scene, "export_study_effect", False) and (self._blur_amount or self._line_clarity):
+                from ..canvas.study_blur import apply_study_effect
+                # Crop at full resolution first, then process — matching
+                # what _get_processed_display_pixmap() does at proxy
+                # resolution, so blur/edge radii (scaled relative to the
+                # cropped image's own size) feel the same in the export
+                # as they did in the on-screen preview.
+                cropped_source = self._source_pixmap.copy(self._crop)
+                processed = apply_study_effect(cropped_source.toImage(), self._blur_amount, self._line_clarity)
+                painter.drawPixmap(rect, QPixmap.fromImage(processed),
+                                    QRectF(0, 0, processed.width(), processed.height()))
+            else:
+                painter.drawPixmap(rect, self._source_pixmap, QRectF(self._crop))
+        elif self._blur_amount or self._line_clarity:
+            pixmap, source_rect = self._get_processed_display_pixmap()
+            painter.drawPixmap(rect, pixmap, source_rect)
+        else:
+            pixmap, source_rect = self._get_display_pixmap()
+            painter.drawPixmap(rect, pixmap, source_rect)
 
         if self._crop_mode:
             path = QPainterPath()
@@ -456,6 +744,13 @@ class ReferenceImageItem(InteractiveItem):
             "base_w": self._base_w, "base_h": self._base_h,
             "crop": [self._crop.x(), self._crop.y(), self._crop.width(), self._crop.height()],
             "image": f"images/{self.image_id}.png",
+            # Study Blur (see canvas/study_blur.py) — 0/0 for every image
+            # until the artist turns it on.
+            "blur": self._blur_amount,
+            "line_clarity": self._line_clarity,
+            # None for images imported before this field existed.
+            "original_format": self.original_format,
+            "original_file_size": self.original_file_size,
         }
 
     @staticmethod
@@ -469,6 +764,8 @@ class ReferenceImageItem(InteractiveItem):
             crop=QRect(*crop_vals),
             # Older files (saved before "name" existed) fall back to the id.
             display_name=d.get("name") or d["id"],
+            original_format=d.get("original_format"),
+            original_file_size=d.get("original_file_size"),
         )
         item.setPos(float(d.get("x", 0)), float(d.get("y", 0)))
         item.setRotation(float(d.get("rotation", 0)))
@@ -482,6 +779,11 @@ class ReferenceImageItem(InteractiveItem):
         item.setOpacity(float(d.get("opacity", 1.0)))
         item.setVisible(bool(d.get("visible", True)))
         item.set_locked(bool(d.get("locked", False)))
+        # Absent on every .atelier file saved before Study Blur existed —
+        # defaults to "no effect," so old projects reopen looking exactly
+        # as they did.
+        item.set_blur_amount(float(d.get("blur", 0.0)))
+        item.set_line_clarity(float(d.get("line_clarity", 0.0)))
         return item
 
     def encode_png(self) -> bytes:
@@ -504,9 +806,15 @@ def fit_base_size(pixmap: QPixmap, canvas_w_in_scene: float, canvas_h_in_scene: 
     return target * (w / h), target
 
 
-class ReferenceLayerGroup(QGraphicsItemGroup):
+class ReferenceLayerGroup(StackedLayerMixin, QGraphicsItemGroup):
     """Owns all reference image items; provides layer-level visibility/lock/
     opacity that the Layers panel drives.
+
+    can_move_forward()/can_move_backward()/move_item_forward()/
+    move_item_backward()/remove_item()/index_of() come from
+    StackedLayerMixin (stacking_mixin.py) — this class only supplies
+    _bucket_for() (trivial here: there's only ever the one bucket) and
+    _reassign_z() (the print-order-IS-list-order scheme below).
     """
 
     def __init__(self):
@@ -515,7 +823,9 @@ class ReferenceLayerGroup(QGraphicsItemGroup):
         self._items: list[ReferenceImageItem] = []
 
     def build_image_item(self, pixmap: QPixmap, canvas_w_scene: float, canvas_h_scene: float,
-                          scene_center: QPointF, display_name: str | None = None) -> ReferenceImageItem:
+                          scene_center: QPointF, display_name: str | None = None,
+                          original_format: str | None = None,
+                          original_file_size: int | None = None) -> ReferenceImageItem:
         """Construct a new item positioned and sized as a fresh import,
         without adding it to the group yet. Used by callers that want to
         route the add through the undo stack (AddItemCommand calls
@@ -523,29 +833,52 @@ class ReferenceLayerGroup(QGraphicsItemGroup):
         non-undoable convenience wrapper for internal/deserialization use.
         """
         base_w, base_h = fit_base_size(pixmap, canvas_w_scene, canvas_h_scene)
-        item = ReferenceImageItem(str(uuid.uuid4()), pixmap, base_w, base_h, display_name=display_name)
+        item = ReferenceImageItem(
+            str(uuid.uuid4()), pixmap, base_w, base_h, display_name=display_name,
+            original_format=original_format, original_file_size=original_file_size,
+        )
         item.setPos(scene_center)
         return item
 
     def add_image(self, pixmap: QPixmap, canvas_w_scene: float, canvas_h_scene: float,
-                   scene_center: QPointF, display_name: str | None = None) -> ReferenceImageItem:
-        item = self.build_image_item(pixmap, canvas_w_scene, canvas_h_scene, scene_center, display_name)
+                   scene_center: QPointF, display_name: str | None = None,
+                   original_format: str | None = None,
+                   original_file_size: int | None = None) -> ReferenceImageItem:
+        item = self.build_image_item(
+            pixmap, canvas_w_scene, canvas_h_scene, scene_center, display_name,
+            original_format, original_file_size,
+        )
         self.add_existing(item)
         return item
 
-    def add_existing(self, item: ReferenceImageItem) -> None:
-        item.setZValue(len(self._items))
+    def add_existing(self, item: ReferenceImageItem, index: int | None = None) -> None:
+        """`index`: insert at this position instead of appending to the
+        end — used by DeleteItemCommand.undo() (undo_commands.py) to
+        restore an item to its exact original stacking position rather
+        than silently moving it to the front.
+        """
         self.addToGroup(item)
-        self._items.append(item)
+        if index is None or index >= len(self._items):
+            self._items.append(item)
+        else:
+            self._items.insert(index, item)
+        self._reassign_z()
 
-    def remove_item(self, item: ReferenceImageItem) -> None:
-        if item in self._items:
-            self._items.remove(item)
-            self.removeFromGroup(item)
-            item.scene().removeItem(item) if item.scene() else None
+    def _bucket_for(self, item) -> list:
+        return self._items
 
     def items(self) -> list[ReferenceImageItem]:
         return list(self._items)
+
+    def _reassign_z(self) -> None:
+        # _items' own order IS the print order (index 0 = bottom) — the
+        # Project Panel's per-row up/down buttons drive
+        # move_item_forward()/backward() (StackedLayerMixin) through
+        # ReorderItemCommand, and this is also exactly what
+        # to_dict()/load_from_dict() persist, so no separate z field
+        # is needed on disk.
+        for i, item in enumerate(self._items):
+            item.setZValue(i)
 
     def clear(self) -> None:
         for item in list(self._items):

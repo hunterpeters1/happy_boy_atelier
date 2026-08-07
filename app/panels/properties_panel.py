@@ -5,7 +5,7 @@ than a maze of per-type stacked pages.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QPointF, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -67,6 +67,32 @@ class PropertiesPanel(QWidget):
         self._note_edit_item = None
         self._position_baseline: QPointF | None = None
         self._position_edit_item = None
+        self._blur_baseline = None
+        self._blur_edit_item = None
+        self._clarity_baseline = None
+        self._clarity_edit_item = None
+        # Recomputing the Study Blur preview costs real time (numpy work,
+        # ~100ms+ even at its capped working resolution — see
+        # reference_layer.py's BLUR_WORKING_DIM) unlike every other slider
+        # here, which only touches cheap Qt state (opacity, position).
+        # Debounced so a fast drag doesn't fire one recompute per pixel of
+        # mouse movement; a paused/slow drag still gets periodic updates
+        # rather than nothing until release. sliderReleased always forces
+        # one final, immediate (non-debounced) recompute.
+        self._blur_preview_timer = QTimer(self)
+        self._blur_preview_timer.setSingleShot(True)
+        self._blur_preview_timer.setInterval(150)
+        self._blur_preview_timer.timeout.connect(self._apply_blur_preview)
+
+        # Fixed regardless of which controls are currently visible — with
+        # no minimum, the dock's preferred width tracked whatever group box
+        # happened to be shown (e.g. the empty "Nothing selected" state is
+        # far narrower than the crop row's three buttons or the batch-align
+        # icon row), so simply switching the canvas selection made the
+        # whole right-hand dock visibly resize. Sized for the widest
+        # realistic row (the crop button trio) plus margin, so it also
+        # reads less cramped ("wider") even at rest.
+        self.setMinimumWidth(300)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -79,6 +105,21 @@ class PropertiesPanel(QWidget):
         self.hint.setProperty("role", "hint")
         self.hint.setWordWrap(True)
         layout.addWidget(self.hint)
+
+        # -- info group (reference images): read-only file metadata ------
+        self.info_box = QGroupBox("Info")
+        info_layout = QVBoxLayout(self.info_box)
+        self.info_filename_label = QLabel()
+        self.info_filename_label.setWordWrap(True)
+        self.info_format_label = QLabel()
+        self.info_size_label = QLabel()
+        self.info_dimensions_label = QLabel()
+        for lbl in (
+            self.info_filename_label, self.info_format_label,
+            self.info_size_label, self.info_dimensions_label,
+        ):
+            info_layout.addWidget(lbl)
+        layout.addWidget(self.info_box)
 
         # -- transform group (reference images) --------------------------
         self.transform_box = QGroupBox("Transform")
@@ -118,6 +159,40 @@ class PropertiesPanel(QWidget):
         self.opacity_slider.sliderReleased.connect(self._on_opacity_released)
         op_row.addWidget(self.opacity_slider)
         tform.addLayout(op_row)
+
+        # -- Study Blur (canvas/study_blur.py): a painter's squint-test —
+        # blur the reference to judge shapes/values, while dark lines stay
+        # legible (boosted, not washed out) even at very low contrast.
+        blur_row = QHBoxLayout()
+        blur_row.addWidget(QLabel("Blur"))
+        self.blur_slider = QSlider(Qt.Horizontal)
+        self.blur_slider.setRange(0, 100)
+        self.blur_slider.setToolTip(
+            "Blur the reference image on screen — a squint-test aid for "
+            "judging overall shapes and values without fine detail. Never "
+            "alters the saved image; off by default for exports too (see "
+            "the Export dialog)."
+        )
+        self.blur_slider.valueChanged.connect(lambda v: self._on_blur_field_changed("blur", v))
+        self.blur_slider.sliderPressed.connect(lambda: self._on_blur_field_pressed("blur"))
+        self.blur_slider.sliderReleased.connect(lambda: self._on_blur_field_released("blur"))
+        blur_row.addWidget(self.blur_slider)
+        tform.addLayout(blur_row)
+
+        clarity_row = QHBoxLayout()
+        clarity_row.addWidget(QLabel("Line Clarity"))
+        self.clarity_slider = QSlider(Qt.Horizontal)
+        self.clarity_slider.setRange(0, 100)
+        self.clarity_slider.setToolTip(
+            "Keeps dark lines/edges sharp against the Blur above, even "
+            "very faint ones — raise this if fine contour or shadow lines "
+            "disappear into the blur."
+        )
+        self.clarity_slider.valueChanged.connect(lambda v: self._on_blur_field_changed("clarity", v))
+        self.clarity_slider.sliderPressed.connect(lambda: self._on_blur_field_pressed("clarity"))
+        self.clarity_slider.sliderReleased.connect(lambda: self._on_blur_field_released("clarity"))
+        clarity_row.addWidget(self.clarity_slider)
+        tform.addLayout(clarity_row)
 
         crop_row = QHBoxLayout()
         self.crop_btn = QPushButton("Crop…")
@@ -219,6 +294,7 @@ class PropertiesPanel(QWidget):
             btn = QToolButton()
             btn.setProperty("role", "compact")
             btn.setIcon(icons.icon(icon_name))
+            icons.register(btn, lambda obj, ic: obj.setIcon(ic), icon_name)
             btn.setToolTip(tip)
             btn.clicked.connect(lambda _checked, m=mode: self._batch_align(m))
             align_row.addWidget(btn)
@@ -248,6 +324,14 @@ class PropertiesPanel(QWidget):
         inches = C.to_inches(value, self.scene.canvas_spec.unit)
         return inches * C.SCENE_PX_PER_INCH
 
+    @staticmethod
+    def _format_file_size(size: int | None) -> str:
+        if size is None:
+            return "Unknown"
+        if size >= 1024 * 1024:
+            return f"{size / (1024 * 1024):.1f} MB"
+        return f"{size / 1024:.0f} KB"
+
     # -----------------------------------------------------------------
     def refresh(self) -> None:
         selected = self.scene.selected_items()
@@ -255,9 +339,10 @@ class PropertiesPanel(QWidget):
         self._apply(item, multiple=len(selected) > 1)
 
     def _apply(self, item, multiple: bool) -> None:
+        self._abort_pending_blur_drag(item)
         self._current = item
 
-        for w in (self.transform_box, self.note_box, self.position_box, self.delete_btn, self.batch_box):
+        for w in (self.info_box, self.transform_box, self.note_box, self.position_box, self.delete_btn, self.batch_box):
             w.setVisible(False)
         self.crop_apply_btn.setVisible(False)
         self.crop_cancel_btn.setVisible(False)
@@ -281,6 +366,13 @@ class PropertiesPanel(QWidget):
         try:
             if isinstance(item, ReferenceImageItem):
                 self.title.setText("Reference Image")
+                self.info_box.setVisible(True)
+                self.info_filename_label.setText(f"File: {item.display_name}")
+                self.info_format_label.setText(f"Format: {item.original_format or 'Unknown'}")
+                self.info_size_label.setText(f"Original size: {self._format_file_size(item.original_file_size)}")
+                self.info_dimensions_label.setText(
+                    f"Dimensions: {item._source_pixmap.width()} × {item._source_pixmap.height()} px"
+                )
                 self.transform_box.setVisible(True)
                 self.crop_btn.setVisible(True)
                 # A locked image can't actually enter crop mode (see
@@ -295,6 +387,8 @@ class PropertiesPanel(QWidget):
                 self.scale_spin.setValue(item.scale_factor())
                 self.rotation_spin.setValue(item.rotation())
                 self.opacity_slider.setValue(int(item.opacity() * 100))
+                self.blur_slider.setValue(int(item.blur_amount()))
+                self.clarity_slider.setValue(int(item.line_clarity()))
                 self.lock_box.setChecked(item.is_locked())
                 self._scale_last = item.scale_factor()
                 self._rotation_last = item.rotation()
@@ -497,6 +591,94 @@ class PropertiesPanel(QWidget):
             new = item.opacity()
             if old != new:
                 self._push_property(item.setOpacity, old, new, "Change opacity")
+
+    # -- Study Blur ---------------------------------------------------------
+    def _on_blur_field_pressed(self, field: str) -> None:
+        if self._current is None or not isinstance(self._current, ReferenceImageItem):
+            return
+        item = self._current
+        # Suppresses the setters' own immediate recompute for the
+        # duration of this drag — see ReferenceImageItem.
+        # set_defer_blur_refresh() for why that matters.
+        item.set_defer_blur_refresh(True)
+        if field == "blur":
+            self._blur_baseline = item.blur_amount()
+            self._blur_edit_item = item
+        else:
+            self._clarity_baseline = item.line_clarity()
+            self._clarity_edit_item = item
+
+    def _on_blur_field_changed(self, field: str, value: int) -> None:
+        if self._updating or self._current is None:
+            return
+        item = self._current
+        if field == "blur":
+            item.set_blur_amount(value)
+        else:
+            item.set_line_clarity(value)
+        # Only schedules the debounced preview recompute — set_blur_amount()/
+        # set_line_clarity() above already trigger a plain repaint via
+        # update(), which redraws whatever's still cached from before this
+        # tick (see ReferenceImageItem._get_processed_display_pixmap()).
+        self._blur_preview_timer.start()
+
+    def _apply_blur_preview(self) -> None:
+        item = self._blur_edit_item or self._clarity_edit_item or self._current
+        if isinstance(item, ReferenceImageItem):
+            item._refresh_processed_pixmap()
+            item.update()
+
+    def _on_blur_field_released(self, field: str) -> None:
+        if field == "blur":
+            baseline, item = self._blur_baseline, self._blur_edit_item
+            self._blur_baseline = None
+            self._blur_edit_item = None
+        else:
+            baseline, item = self._clarity_baseline, self._clarity_edit_item
+            self._clarity_baseline = None
+            self._clarity_edit_item = None
+        if baseline is None or item is None:
+            return
+        self._finish_blur_drag(field, baseline, item)
+
+    def _finish_blur_drag(self, field: str, baseline, item) -> None:
+        """Shared by a normal slider release and _abort_pending_blur_drag()
+        below (an interrupted drag — e.g. Delete pressed while still
+        holding the slider) — both need the same cleanup: stop deferring
+        this item's recompute, force one final immediate recompute
+        rather than leaving it to the debounce timer, and commit an undo
+        step if the value actually changed.
+        """
+        item.set_defer_blur_refresh(False)
+        self._blur_preview_timer.stop()
+        item._refresh_processed_pixmap()
+        item.update()
+        new = item.blur_amount() if field == "blur" else item.line_clarity()
+        if baseline != new:
+            setter = item.set_blur_amount if field == "blur" else item.set_line_clarity
+            label = "Change blur" if field == "blur" else "Change line clarity"
+            self._push_property(setter, baseline, new, label)
+
+    def _abort_pending_blur_drag(self, new_item) -> None:
+        """Called at the top of _apply() (every refresh: selection
+        change, undo/redo, item add/delete) — if a Blur/Line Clarity
+        press is still pending (mouse down, sliderReleased never fired)
+        for an item that's about to stop being the selection, finish it
+        as an implicit release instead of leaving set_defer_blur_refresh
+        (True) stuck forever on an item nothing will ever un-defer again
+        (e.g. Delete pressed mid-drag: selection clears, sliderReleased
+        never comes, and every later non-deferred setter call — undo/redo
+        of an earlier change — would silently skip recomputing the
+        processed-pixmap cache from then on).
+        """
+        if self._blur_edit_item is not None and self._blur_edit_item is not new_item:
+            self._finish_blur_drag("blur", self._blur_baseline, self._blur_edit_item)
+            self._blur_baseline = None
+            self._blur_edit_item = None
+        if self._clarity_edit_item is not None and self._clarity_edit_item is not new_item:
+            self._finish_blur_drag("clarity", self._clarity_baseline, self._clarity_edit_item)
+            self._clarity_baseline = None
+            self._clarity_edit_item = None
 
     def _on_lock_toggled(self, on: bool) -> None:
         # Lock state is deliberately excluded from undo/redo (Phase 0

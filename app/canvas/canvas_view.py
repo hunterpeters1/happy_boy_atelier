@@ -29,11 +29,19 @@ class CanvasView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setDragMode(QGraphicsView.RubberBandDrag)
-        self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-        self.setBackgroundBrush(QColor(C.COLOR_BG_DARKEST))
+        # SmartViewportUpdate (not FullViewportUpdate): repaint only the
+        # region that actually changed each frame instead of the whole
+        # viewport on every drag/resize tick. drawForeground()'s ruler
+        # doesn't restrict itself to the passed `rect`, but Qt clips the
+        # painter to the dirty region during a partial update regardless,
+        # so this is a safe, purely-perf change — nothing here relied on
+        # full-viewport repaints for correctness.
+        self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
+        self.setBackgroundBrush(QColor(C.COLOR_CANVAS_BG))
         self._zoom = 1.0
         self._space_panning = False
         self._middle_panning = False
+        self._tool_armed = False
         self._show_ruler = True
         self.setMouseTracking(True)
         self.setAcceptDrops(True)
@@ -57,11 +65,6 @@ class CanvasView(QGraphicsView):
     def zoom_out(self) -> None:
         self.set_zoom(self._zoom / ZOOM_STEP)
 
-    def zoom_reset(self) -> None:
-        self.resetTransform()
-        self._zoom = 1.0
-        self.zoom_changed.emit(self._zoom)
-
     def fit_canvas(self, rect: QRectF, margin: float = 40) -> None:
         if rect.isEmpty():
             return
@@ -70,25 +73,20 @@ class CanvasView(QGraphicsView):
         self.zoom_changed.emit(self._zoom)
 
     def wheelEvent(self, event):
-        # Ctrl/Cmd+scroll zooms — the convention every other creative tool
-        # already trains into a painter's hand. Plain scroll pans vertically
-        # and Shift+scroll pans horizontally, matching a native scroll area
-        # instead of the reverse (plain wheel = zoom) this view used to use.
+        # Plain wheel zooms. Panning stays available via the scrollbars
+        # and space+drag/middle-drag — no wheel modifier does anything
+        # special.
         delta = event.angleDelta().y() or event.angleDelta().x()
         if delta == 0:
             return
-        if event.modifiers() & Qt.ControlModifier:
-            self.set_zoom(self._zoom * (ZOOM_STEP if delta > 0 else 1 / ZOOM_STEP))
-            return
-        bar = self.horizontalScrollBar() if event.modifiers() & Qt.ShiftModifier else self.verticalScrollBar()
-        bar.setValue(bar.value() - delta)
+        self.set_zoom(self._zoom * (ZOOM_STEP if delta > 0 else 1 / ZOOM_STEP))
 
     # -- pan --------------------------------------------------------------
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Space and not event.isAutoRepeat():
             self._space_panning = True
             self.setDragMode(QGraphicsView.ScrollHandDrag)
-            self.setCursor(QCursor(Qt.OpenHandCursor))
+            self._refresh_cursor()
             return
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             scene = self.scene()
@@ -101,20 +99,51 @@ class CanvasView(QGraphicsView):
         if event.key() == Qt.Key_Space and not event.isAutoRepeat():
             self._space_panning = False
             self.setDragMode(QGraphicsView.RubberBandDrag)
-            self.unsetCursor()
+            self._refresh_cursor()
         super().keyReleaseEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MiddleButton:
             self.setDragMode(QGraphicsView.ScrollHandDrag)
             self._middle_panning = True
-            self.setCursor(QCursor(Qt.ClosedHandCursor))
+            self._refresh_cursor()
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
         if event.button() == Qt.MiddleButton:
+            self._middle_panning = False
             self.setDragMode(QGraphicsView.RubberBandDrag if not self._space_panning else QGraphicsView.ScrollHandDrag)
+            self._refresh_cursor()
+
+    # -- tool-armed cursor --------------------------------------------------
+    def set_tool_armed(self, armed: bool) -> None:
+        """Called by CanvasScene.set_active_tool() (the single choke point
+        for every tool activation/deactivation) so a crosshair shows
+        while a placement tool (focal point, note, light source, etc.) is
+        armed — previously the only cue was the status bar text and a
+        right-click "Cancel Tool" entry, with no persistent visual cue
+        that clicking anywhere would place something.
+        """
+        self._tool_armed = armed
+        self._refresh_cursor()
+
+    def _refresh_cursor(self) -> None:
+        """Single place that decides the view's cursor, by priority:
+        active panning (space or middle-button drag) > an armed
+        placement tool > the plain default. Centralized rather than each
+        of the four call sites above setting/unsetting the cursor
+        directly, which would otherwise have a real bug: releasing
+        space-pan while a tool was still armed would revert to the plain
+        arrow instead of back to the crosshair.
+        """
+        if self._space_panning:
+            self.setCursor(QCursor(Qt.OpenHandCursor))
+        elif self._middle_panning:
+            self.setCursor(QCursor(Qt.ClosedHandCursor))
+        elif self._tool_armed:
+            self.setCursor(QCursor(Qt.CrossCursor))
+        else:
             self.unsetCursor()
 
     # -- OS drag-and-drop import ------------------------------------------
@@ -192,6 +221,18 @@ class CanvasView(QGraphicsView):
             return
         if not menu.isEmpty():
             menu.exec(event.globalPos())
+
+    # -- theme -------------------------------------------------------------
+    def refresh_theme_colors(self) -> None:
+        """The background brush is a QBrush set once at construction, not
+        something QPalette/stylesheet changes touch on their own — call
+        this after a live theme switch (see MainWindow._set_theme()) so
+        the void beyond the scene's padded rect matches CanvasScene.
+        drawBackground()'s freshly-repainted COLOR_CANVAS_BG immediately,
+        instead of only after the next restart.
+        """
+        self.setBackgroundBrush(QColor(C.COLOR_CANVAS_BG))
+        self.viewport().update()
 
     # -- ruler overlay ----------------------------------------------------
     def set_ruler_visible(self, visible: bool) -> None:

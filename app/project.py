@@ -88,12 +88,4 @@ def empty_manifest(canvas: CanvasSpec, meta: ProjectMeta) -> dict:
         },
         "lighting": {"sources": [], "arrows": [], "notes": []},
         "guides": {"rule_of_thirds": False, "golden_ratio": False},
-        "projector_state": {
-            "opacity": 1.0,
-            "zoom": 1.0,
-            "pan": [0.0, 0.0],
-            "rotation": 0.0,
-            "flip_h": False,
-            "locked": False,
-        },
     }

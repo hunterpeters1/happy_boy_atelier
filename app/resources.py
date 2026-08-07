@@ -26,3 +26,7 @@ def resource_path(*relative_parts: str) -> str:
 
 def app_icon_path() -> str:
     return resource_path("resources", "icons", "app.ico")
+
+
+def space_grotesk_font_path() -> str:
+    return resource_path("resources", "SpaceGrotesk-VariableFont_wght.ttf")

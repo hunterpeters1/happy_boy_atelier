@@ -129,7 +129,20 @@ def render_scene_to_image(scene: QGraphicsScene, source_rect: QRectF,
     painter = QPainter(image)
     painter.setRenderHint(QPainter.Antialiasing, True)
     painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-    scene.render(painter, QRectF(0, 0, out_w, out_h), source_rect)
+    # ReferenceImageItem.paint() checks this to always draw the
+    # full-resolution source pixmap here instead of the downscaled
+    # interactive-display proxy it uses for normal on-screen painting
+    # (see reference_layer.py) — covers export_png/export_jpg and
+    # render_thumbnail, which all funnel through this one function.
+    # Confirmed empirically that QGraphicsItem.paint()'s `widget`
+    # parameter is NOT a reliable signal for "am I being exported" (it
+    # came through None even for normal on-screen QGraphicsView painting
+    # under the offscreen QPA platform), hence this explicit flag instead.
+    scene.rendering_for_export = True
+    try:
+        scene.render(painter, QRectF(0, 0, out_w, out_h), source_rect)
+    finally:
+        scene.rendering_for_export = False
     painter.end()
     return image
 
@@ -190,7 +203,11 @@ def export_pdf_planning_sheet(scene: QGraphicsScene, source_rect: QRectF,
 
     painter.setPen(Qt.black)
     painter.drawRect(fit_rect)
-    scene.render(painter, fit_rect, source_rect)
+    scene.rendering_for_export = True
+    try:
+        scene.render(painter, fit_rect, source_rect)
+    finally:
+        scene.rendering_for_export = False
 
     notes_top = canvas_rect.y() + canvas_rect.height() + 24
     font.setPointSize(12)

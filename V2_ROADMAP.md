@@ -209,11 +209,12 @@ doesn't touch existing layers.*
   before this doc was written; this item is specifically about the
   Guides layer's two fixed overlays)
 
-### Phase 3 — Projector Mode Pro — ⬜ not started
+### Phase 3 — Projector Mode Pro — ⬜ cut, moot
 *Most technically involved phase — real geometric complexity (quad-warp
 homography), not just UI. Should only be scoped in if Section 5's
-question about it comes back "yes, this matters."* Still an open
-question — see Section 6, item 1, still unanswered.
+question about it comes back "yes, this matters."* Moot: projector mode
+itself (the foundation this phase would have built on) has since been
+removed from the app entirely, not just left unstarted.
 
 - ⬜ Corner-pin/keystone correction for off-axis projectors
 - ⬜ Multi-monitor target selection for fullscreen
@@ -269,6 +270,8 @@ landed and been used for real; this phase is worth actually revisiting.
    pan/zoom/rotate/flip actually a limitation you've hit, or is it good
    enough? This is the most technically expensive single feature in the
    roadmap — want to confirm it's earning that cost before scoping it in.
+   Moot as of the projector mode removal — nothing to correct keystone
+   *of* anymore.
 2. **Installer vs. portable exe:** given the packaging friction this
    round, is it worth investing in a proper installer (handles the icon/
    shortcut/Defender friction as a side effect), or does portable-exe-on-
@@ -310,8 +313,6 @@ never stuck for children of these `QGraphicsItemGroup` layers).
   edge (not just center-to-center) reference-image snapping
 - Reference-image memory footprint / proxy-resolution strategy (Section
   1, Section 5 item 2) — still genuinely unvalidated
-- Projector keystone/corner-pin + multi-monitor target selection (Phase
-  3) — still gated on Section 6 item 1's unanswered question
 - Templates, color eyedropper, multiple open projects/tabs (Phase 4) —
   still gated on Section 6 items 4–5; worth actually re-proposing now
   that Phases 0–1 are in real use, per this doc's own original plan

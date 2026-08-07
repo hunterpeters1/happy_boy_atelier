@@ -128,6 +128,10 @@ COLOR_COPPER = "#b06a4a"       # secondary accent
 
 COLOR_CANVAS = "#efe9dd"       # the painting surface itself (warm paper white)
 COLOR_CANVAS_EDGE = "#0c0d0e"
+COLOR_CANVAS_BG = "#15171a"    # the desk/void behind the physical canvas rect
+                                # (CanvasScene.drawBackground) — theme-dependent
+                                # (pitch black in every mode but Light), unlike
+                                # COLOR_CANVAS itself, which never changes
 
 COLOR_FOCAL_PRIMARY = "#c9482f"    # focal point markers
 # Reserved hues below: every content-marker color is deliberately distinct

@@ -6,12 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Happy Boy Atelier — a Windows desktop app (PySide6/Qt) for traditional
 painters to plan a physical painting before touching canvas: pick a
-format, arrange reference photos, plan composition/perspective/lighting,
-then trace it onto the wall in projector mode. It is **not** a paint
-program and **not** an AI image generator — every mark is placed by the
-artist; the software never infers composition, perspective, or lighting.
-AI generation, a brush engine, cloud accounts, and social/marketplace
-features are explicitly out of scope.
+format, arrange reference photos, and plan composition/perspective/
+lighting. It is **not** a paint program and **not** an AI image
+generator — every mark is placed by the artist; the software never
+infers composition, perspective, or lighting. AI generation, a brush
+engine, cloud accounts, and social/marketplace features are explicitly
+out of scope. Projector mode (a fullscreen tracing-aid view) was removed
+— see git history if you need to resurrect it.
 
 This is a git repository (initialized partway through the UX redesign
 below — there is no history before the "Baseline commit before UX
@@ -62,9 +63,11 @@ raises `ModuleNotFoundError` at runtime despite a successful build) and
 `datas=[("resources", "resources")]` (without it `setWindowIcon()`
 silently no-ops in the frozen exe because `app_icon_path()` can't find
 `resources/icons/app.ico` inside the bundle). Must be built on Windows —
-PyInstaller doesn't cross-compile. `Happy Boy Atelier.spec` (with spaces,
-no PySide6 collect_all baked in) is an older/stale spec file — prefer
-`HappyBoyAtelier.spec`. `scripts/` is an empty leftover directory.
+PyInstaller doesn't cross-compile. `scripts/` doesn't exist — there is no
+build-helper directory, deliberately (see above); `Happy Boy Atelier.spec`
+(with spaces, an older/stale spec file this note used to tell you to
+avoid in favor of `HappyBoyAtelier.spec`) has been deleted entirely, so
+there's now only the one spec file.
 
 ## Architecture
 
@@ -174,13 +177,59 @@ handle) used by movable/scalable/rotatable items — currently reference
 images. Corner drags default to independent width/height scaling
 (free-transform); hold Shift to lock aspect ratio.
 
+**Interactive painting vs. export/render (`app/layers/reference_layer.py`,
+`app/canvas/canvas_scene.py`, `app/atelier_io.py`):** `ReferenceImageItem`
+never draws its full-resolution `_source_pixmap` on screen — `paint()`
+draws a cached, capped-size (`MAX_DISPLAY_DIM`) downscaled proxy instead
+(`_get_display_pixmap()`), regenerated only when the crop changes. A
+multi-megapixel camera photo bilinear-resampled on every repaint frame of
+every drag/resize was the main cost behind sluggish interaction; this
+(plus `InteractiveItem.setCacheMode(DeviceCoordinateCache)` in the shared
+base class, and `CanvasView`'s `SmartViewportUpdate` instead of
+`FullViewportUpdate`) is what fixed it. Export/thumbnail rendering must
+still use the full-resolution source — `CanvasScene.rendering_for_export`
+is an explicit flag set/reset in a `try`/`finally` around every
+`scene.render()` call in `atelier_io.py`, which `paint()` checks. **Not**
+the `widget` parameter Qt passes to `paint()` — confirmed at runtime that
+`widget is None` is not a reliable "is this an export" signal (it came
+through `None` even for normal on-screen `QGraphicsView` painting under
+the offscreen QPA platform tests run under), which is why this explicit
+flag exists instead of the more obvious-looking shortcut.
+
+**Study Blur (`app/canvas/study_blur.py`):** a per-reference-image,
+non-destructive "squint test" filter — blur the displayed image while
+boosting the contrast of dark lines/edges so they stay legible even at
+very low contrast, via `apply_study_effect()`, a pure numpy function (this
+app's first and only dependency beyond PySide6) with no Qt/item coupling,
+same spirit as `resize_math.py`. `ReferenceImageItem.blur_amount()`/
+`line_clarity()` are plain 0-100 float fields (`to_dict`/`from_dict` keys
+`"blur"`/`"line_clarity"`, defaulting to 0.0 for every pre-existing
+`.atelier` file) driving a separately-cached processed pixmap
+(`_get_processed_display_pixmap()`/`_refresh_processed_pixmap()`),
+processed at an even smaller `BLUR_WORKING_DIM` than the display proxy
+above and scaled back up — the numpy pass is real work (~100ms+ even
+capped), measured at the better part of a second at full display-proxy
+resolution. Recomputing this synchronously on every Properties-panel
+slider tick would reintroduce exactly the per-frame-cost problem the
+paragraph above fixed, so `ReferenceImageItem.set_defer_blur_refresh()`
+lets `PropertiesPanel` suppress the setters' normal immediate-recompute
+behavior for the duration of an active slider drag, batching to a
+debounced timer plus one forced recompute on release — every *other*
+caller of `set_blur_amount()`/`set_line_clarity()` (undo/redo, project
+load) is not deferred and always recomputes immediately, or the cache
+goes stale relative to the actual current values. Never baked into
+exports unless the artist opts in via the Export dialog's checkbox
+(`ExportDialog.include_study_effect()` → `CanvasScene.
+export_study_effect`, a second flag alongside `rendering_for_export`,
+also reset in `finally` — thumbnails must never pick it up).
+
 **Modes:** Draft (default, full editing) → Locked setup
-(`Project.locked = True`, freezes every layer, explicit unlock required)
-→ Projector mode (`app/projector/projector_window.py`, a separate
-fullscreen `QWidget`/`QGraphicsView` rendering a *snapshot* of the
-reference layer, deliberately decoupled from the live editing scene so
-projector zoom/pan/rotation/flip can never corrupt the working project —
-preserve that decoupling when touching projector code).
+(`Project.locked = True`, freezes every layer, explicit unlock required).
+Projector mode (a separate fullscreen snapshot view of the reference
+layer) existed through the UX redesign below but has since been removed
+entirely, including its `.atelier` `projector_state` manifest field —
+don't reintroduce a manifest field or menu item for it without checking
+whether the removal was deliberate for the specific task at hand.
 
 **Export (`app/atelier_io.py`, `app/dialogs/export_dialog.py`):** PNG/JPG
 via `QGraphicsScene.render()` into a `QImage` at a chosen output DPI; PDF

@@ -66,6 +66,23 @@ class CanvasScene(QGraphicsScene):
         self._global_locked = False
         self._layer_locked_flags = {kind: False for kind in C.LAYER_ORDER}
 
+        # Render-mode flags ReferenceImageItem.paint() reads directly
+        # (see reference_layer.py). Set/reset in a try/finally around the
+        # scene.render() calls in atelier_io.py, never left on. Explicit
+        # flags rather than trusting QGraphicsItem.paint()'s `widget`
+        # parameter — confirmed empirically that it's not a reliable
+        # signal for "is this an export render," since it came through
+        # None even for normal on-screen QGraphicsView painting under the
+        # offscreen QPA platform used in tests.
+        self.rendering_for_export = False
+        # Only True while an actual user-triggered export with the Study
+        # Blur checkbox enabled is in progress (see MainWindow.
+        # export_project()) — deliberately separate from
+        # rendering_for_export, which also covers thumbnail generation at
+        # Save time, where the study effect should never apply regardless
+        # of the last export dialog's checkbox state.
+        self.export_study_effect = False
+
         # The app's own selection list — see selected_items() below for why
         # this exists instead of using QGraphicsScene's built-in one.
         self._selected_items: list = []
@@ -156,19 +173,8 @@ class CanvasScene(QGraphicsScene):
     def canvas_rect(self) -> QRectF:
         return self._canvas_rect
 
-    def resize_canvas(self, canvas_spec: CanvasSpec) -> None:
-        self.canvas_spec = canvas_spec
-        w = canvas_spec.width_in * C.SCENE_PX_PER_INCH
-        h = canvas_spec.height_in * C.SCENE_PX_PER_INCH
-        self._canvas_rect = QRectF(0, 0, w, h)
-        self.setSceneRect(self._canvas_rect.adjusted(-4000, -4000, 4000, 4000))
-        self.perspective_layer.horizon.set_canvas_width(w)
-        self.guides_layer.thirds.set_rect(self._canvas_rect)
-        self.guides_layer.golden.set_rect(self._canvas_rect)
-        self.update()
-
     def drawBackground(self, painter, rect) -> None:
-        painter.fillRect(rect, QColor(C.COLOR_BG_DARKEST))
+        painter.fillRect(rect, QColor(C.COLOR_CANVAS_BG))
         shadow = self._canvas_rect.adjusted(6, 8, 6, 8)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(QColor(0, 0, 0, 90)))
@@ -182,6 +188,15 @@ class CanvasScene(QGraphicsScene):
         self._active_tool = tool
         self._pending_point = None
         self._clear_preview_line()
+        # The single choke point every tool activation/deactivation goes
+        # through — toolbar clicks (LayersPanel._activate_tool()) and
+        # every internal auto-clear below (after placing an item,
+        # right-click cancel, Escape) all call this, not some other path
+        # — so driving the view's crosshair cursor from here is reliable
+        # regardless of which of those triggered the change.
+        for view in self.views():
+            if hasattr(view, "set_tool_armed"):
+                view.set_tool_armed(tool is not None)
 
     def _clear_preview_line(self) -> None:
         if self._preview_line is not None:

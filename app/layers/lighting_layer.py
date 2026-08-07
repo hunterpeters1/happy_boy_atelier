@@ -14,16 +14,19 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsItemGroup, QGraphicsRectIt
 from .. import constants as C
 from ..canvas.interactive_item import InteractiveItem
 from .composition_layer import NoteItem
+from .stacking_mixin import StackedLayerMixin
 
 SOURCE_R = 10
-POINT_HANDLE_PX = 8
+# Was 8 — bumped for a more forgiving grab, same reasoning as
+# reference_layer.py's HANDLE_HIT_RADIUS_PX widening.
+POINT_HANDLE_PX = 12
 
 
 class LightSourceItem(InteractiveItem):
     def __init__(self, source_id: str | None = None):
         super().__init__()
         self.source_id = source_id or str(uuid.uuid4())
-        self.setCursor(Qt.PointingHandCursor)
+        self.set_normal_cursor(Qt.PointingHandCursor)
         self.setZValue(12)
 
     def boundingRect(self) -> QRectF:
@@ -101,6 +104,10 @@ class DirectionArrowItem(InteractiveItem):
         self._p1 = p1
         self._p2 = p2
         self.setZValue(8)
+        # The only other InteractiveItem subclass with no cursor at all —
+        # every sibling marker gives a PointingHandCursor cue that it's
+        # grabbable; this one didn't.
+        self.set_normal_cursor(Qt.PointingHandCursor)
         self._h1 = _PointHandle(self, "p1")
         self._h2 = _PointHandle(self, "p2")
         self._reposition_handles()
@@ -170,7 +177,22 @@ class DirectionArrowItem(InteractiveItem):
         )
 
 
-class LightingLayerGroup(QGraphicsItemGroup):
+class LightingLayerGroup(StackedLayerMixin, QGraphicsItemGroup):
+    """can_move_forward()/can_move_backward()/move_item_forward()/
+    move_item_backward()/remove_item()/index_of() come from
+    StackedLayerMixin (stacking_mixin.py) — this class supplies
+    _bucket_for() and _reassign_z() below.
+    """
+
+    # Stacking bands — see CompositionLayerGroup's for the same pattern:
+    # arrows always print under notes, which always print under source
+    # markers (matching each item class's own historical setZValue()
+    # call); the Project Panel's up/down buttons reorder *within* a band.
+    _Z_BAND_ARROW = 8.0
+    _Z_BAND_NOTE = 11.0
+    _Z_BAND_SOURCE = 12.0
+    _Z_STEP = 0.01
+
     def __init__(self):
         super().__init__()
         self.setHandlesChildEvents(False)
@@ -178,31 +200,45 @@ class LightingLayerGroup(QGraphicsItemGroup):
         self.arrows: list[DirectionArrowItem] = []
         self.notes: list[NoteItem] = []
 
-    def add_existing(self, item) -> None:
+    def add_existing(self, item, index: int | None = None) -> None:
         """Add an already-constructed item, routing it to the right
         bookkeeping bucket by type — the single choke point both the
         convenience add_X() methods below and AddItemCommand's redo() use.
+        `index`: insert at this position within the bucket instead of
+        appending — used by DeleteItemCommand.undo() (undo_commands.py)
+        to restore an item's exact original stacking position.
         """
-        if isinstance(item, LightSourceItem):
-            bucket = self.sources
-        elif isinstance(item, DirectionArrowItem):
-            bucket = self.arrows
-        elif isinstance(item, NoteItem):
-            bucket = self.notes
-        else:
+        bucket = self._bucket_for(item)
+        if bucket is None:
             raise TypeError(f"LightingLayerGroup cannot host {type(item).__name__}")
         self.addToGroup(item)
         if item not in bucket:
-            bucket.append(item)
+            if index is None or index >= len(bucket):
+                bucket.append(item)
+            else:
+                bucket.insert(index, item)
+        self._reassign_z()
+
+    def _bucket_for(self, item):
+        if isinstance(item, LightSourceItem):
+            return self.sources
+        if isinstance(item, DirectionArrowItem):
+            return self.arrows
+        if isinstance(item, NoteItem):
+            return self.notes
+        return None
+
+    def _reassign_z(self) -> None:
+        for i, item in enumerate(self.arrows):
+            item.setZValue(self._Z_BAND_ARROW + i * self._Z_STEP)
+        for i, item in enumerate(self.notes):
+            item.setZValue(self._Z_BAND_NOTE + i * self._Z_STEP)
+        for i, item in enumerate(self.sources):
+            item.setZValue(self._Z_BAND_SOURCE + i * self._Z_STEP)
 
     def add_source(self, pos: QPointF) -> LightSourceItem:
         item = LightSourceItem()
         item.setPos(pos)
-        self.add_existing(item)
-        return item
-
-    def add_arrow(self, kind: str, p1: QPointF, p2: QPointF) -> DirectionArrowItem:
-        item = DirectionArrowItem(kind, p1, p2)
         self.add_existing(item)
         return item
 
@@ -214,14 +250,6 @@ class LightingLayerGroup(QGraphicsItemGroup):
 
     def all_items(self):
         return [*self.sources, *self.arrows, *self.notes]
-
-    def remove_item(self, item) -> None:
-        for bucket in (self.sources, self.arrows, self.notes):
-            if item in bucket:
-                bucket.remove(item)
-        self.removeFromGroup(item)
-        if item.scene():
-            item.scene().removeItem(item)
 
     def clear(self) -> None:
         for item in self.all_items():
@@ -252,3 +280,4 @@ class LightingLayerGroup(QGraphicsItemGroup):
             item = NoteItem.from_dict(n, color=C.COLOR_LIGHT)
             self.addToGroup(item)
             self.notes.append(item)
+        self._reassign_z()

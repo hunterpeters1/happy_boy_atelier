@@ -97,22 +97,14 @@ over SSH. `tests/test_project.py` has no Qt dependency at all;
 - **Ctrl+K** — command palette, searches every menu action by name.
 - **Right-click** an item for Delete/Lock/Crop…, or empty canvas for Fit
   Canvas.
-- **Mode > Lock Setup** — freezes every layer so nothing moves by accident
+- **Edit > Lock Setup** — freezes every layer so nothing moves by accident
   once the plan is final.
-- **Mode > Enter Projector Mode (F5)** — fullscreen view of the reference
-  layer with its own opacity/zoom/pan/rotation/flip and a Lock Projection
-  toggle, for tracing the setup onto the physical canvas.
 - **File > Save / Open / Open Recent** — projects are single portable
   `.atelier` files; reference images are embedded, never linked
   externally.
 - **File > Export…** — PNG, JPG, or a one-page PDF planning sheet, on one
   panel with the destination pre-filled from the project name.
 
-## What's intentionally not here
-
-AI image generation, a brush/paint engine, cloud accounts, and social or
-marketplace features are out of scope by design — see the "Out of Scope"
-section of the product spec and `ARCHITECTURE.md`.
 
 ## Status
 

@@ -1,18 +1,19 @@
 # PyInstaller build spec for Happy Boy Atelier.
 #
-# Build on Windows with:
-#     scripts\build_windows.ps1
-#
-# (or manually: pyinstaller HappyBoyAtelier.spec — see the script's header
-# comment for the full manual fallback if PowerShell scripts get flagged)
+# There is deliberately no build script (build.bat, PowerShell helpers,
+# etc.) — every one tried got flagged/blocked by Windows on the dev
+# machine, since a downloaded script that installs things and calls
+# other scripts is exactly what SmartScreen/AV heuristics watch for.
+# Build by typing the commands yourself (see CLAUDE.md's "Building the
+# .exe" section for the full sequence, including requirements-build.txt):
+#     python -m PyInstaller HappyBoyAtelier.spec --noconfirm
 #
 # Produces a single-file, windowed (no console) executable at
 # dist/Happy Boy Atelier.exe. PyInstaller cannot cross-compile, so this must
 # be run on a Windows machine to produce a Windows .exe.
 #
 # Two things this spec bakes in on purpose, both found the hard way during
-# v1.0 packaging — see scripts/build_windows.ps1's header comment for the
-# full story of each:
+# v1.0 packaging:
 #   - collect_all("PySide6"): without it, the built exe raises
 #     ModuleNotFoundError: No module named 'PySide6' at runtime even though
 #     the build itself reports success.

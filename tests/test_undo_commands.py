@@ -24,6 +24,7 @@ from app.canvas.undo_commands import (
     AddItemCommand,
     CropItemCommand,
     DeleteItemCommand,
+    ReorderItemCommand,
     SetNoteTextCommand,
     SetPerspectiveModeCommand,
     SetPropertyCommand,
@@ -70,6 +71,50 @@ def test_delete_item_command_undo_redo(qapp):
 
     scene.undo_stack.redo()
     assert item not in scene.composition_layer.focal_points
+
+
+def test_delete_item_command_undo_restores_original_stacking_position(qapp):
+    """Deleting a non-last item and undoing must restore it to its exact
+    original position, not silently move it to the front of the stack —
+    add_existing() alone always appends, which is what DeleteItemCommand
+    used to do on undo (a real bug: print order permanently changed).
+    """
+    scene = _scene(qapp)
+    pixmap = QPixmap(10, 10)
+    a = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    b = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    c = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    assert scene.reference_layer.items() == [a, b, c]
+
+    scene.undo_stack.push(DeleteItemCommand(scene.reference_layer, b, "Delete item"))
+    assert scene.reference_layer.items() == [a, c]
+
+    scene.undo_stack.undo()
+    assert scene.reference_layer.items() == [a, b, c]  # restored in the middle, not appended
+
+    scene.undo_stack.redo()
+    assert scene.reference_layer.items() == [a, c]
+    scene.undo_stack.undo()
+    assert scene.reference_layer.items() == [a, b, c]
+
+
+def test_delete_item_command_undo_restores_position_in_typed_bucket(qapp):
+    """Same guarantee for a typed-bucket group (composition/lighting) —
+    deleting one of several focal points and undoing must land it back
+    in the same spot within the focal_points bucket specifically.
+    """
+    scene = _scene(qapp)
+    layer = scene.composition_layer
+    a = layer.add_focal_point("primary", QPointF(0, 0))
+    b = layer.add_focal_point("primary", QPointF(10, 10))
+    c = layer.add_focal_point("primary", QPointF(20, 20))
+    assert layer.focal_points == [a, b, c]
+
+    scene.undo_stack.push(DeleteItemCommand(layer, b, "Delete item"))
+    assert layer.focal_points == [a, c]
+
+    scene.undo_stack.undo()
+    assert layer.focal_points == [a, b, c]
 
 
 def test_tool_click_add_and_delete_selected_round_trip(qapp):
@@ -600,6 +645,117 @@ def test_multi_select_delete_is_one_undo_step(qapp):
     scene.undo_stack.undo()
     assert a in scene.composition_layer.focal_points
     assert b in scene.composition_layer.focal_points
+
+
+# -- ReorderItemCommand / layer group stacking order --------------------------------
+
+def test_reference_layer_reorder_forward_backward(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(10, 10)
+    a = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    b = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    c = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    assert scene.reference_layer.items() == [a, b, c]
+    assert [i.zValue() for i in (a, b, c)] == [0, 1, 2]
+
+    assert scene.reference_layer.move_item_forward(a) is True
+    assert scene.reference_layer.items() == [b, a, c]
+    assert a.zValue() > b.zValue()
+
+    assert scene.reference_layer.move_item_backward(c) is True
+    assert scene.reference_layer.items() == [b, c, a]
+
+    # Boundaries: can't move the frontmost item (a, now last) further
+    # forward, or the backmost item (b, still first) further backward.
+    assert scene.reference_layer.can_move_forward(a) is False
+    assert scene.reference_layer.move_item_forward(a) is False
+    assert scene.reference_layer.items() == [b, c, a]
+
+    assert scene.reference_layer.can_move_backward(b) is False
+    assert scene.reference_layer.move_item_backward(b) is False
+
+
+def test_reorder_item_command_undo_redo(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(10, 10)
+    a = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    b = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    assert scene.reference_layer.items() == [a, b]
+
+    scene.undo_stack.push(ReorderItemCommand(scene.reference_layer, a, forward=True))
+    assert scene.reference_layer.items() == [b, a]
+
+    scene.undo_stack.undo()
+    assert scene.reference_layer.items() == [a, b]
+
+    scene.undo_stack.redo()
+    assert scene.reference_layer.items() == [b, a]
+
+    # backward is the exact mirror
+    scene.undo_stack.push(ReorderItemCommand(scene.reference_layer, a, forward=False))
+    assert scene.reference_layer.items() == [a, b]
+    scene.undo_stack.undo()
+    assert scene.reference_layer.items() == [b, a]
+
+
+def test_composition_layer_reorder_is_scoped_to_marker_type(qapp):
+    """Reordering only moves an item within its own marker-type bucket
+    (focal points among focal points, notes among notes, etc.) — the
+    fixed band ordering between types (movement lines < focal points <
+    notes) is deliberate, not something the up/down buttons can disturb.
+    """
+    scene = _scene(qapp)
+    layer = scene.composition_layer
+    fp1 = layer.add_focal_point("primary", QPointF(0, 0))
+    fp2 = layer.add_focal_point("secondary", QPointF(10, 10))
+    note = layer.add_note(QPointF(20, 20))
+
+    assert layer.can_move_forward(fp1) is True
+    assert layer.move_item_forward(fp1) is True
+    assert layer.focal_points == [fp2, fp1]
+    # Still under the note band regardless of intra-bucket reordering.
+    assert fp1.zValue() < note.zValue()
+    assert fp2.zValue() < note.zValue()
+
+    # A note has no siblings yet, so it can't move at all.
+    assert layer.can_move_forward(note) is False
+    assert layer.can_move_backward(note) is False
+    assert layer.move_item_forward(note) is False
+
+
+def test_lighting_layer_reorder_scoped_to_marker_type(qapp):
+    scene = _scene(qapp)
+    layer = scene.lighting_layer
+    s1 = layer.add_source(QPointF(0, 0))
+    s2 = layer.add_source(QPointF(10, 10))
+
+    assert layer.move_item_backward(s2) is True
+    assert layer.sources == [s2, s1]
+
+
+# -- StackedLayerMixin.index_of() (layers/stacking_mixin.py) ------------------------
+
+def test_index_of_reflects_position_and_absence(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(10, 10)
+    a = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    b = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    assert scene.reference_layer.index_of(a) == 0
+    assert scene.reference_layer.index_of(b) == 1
+
+    other = FocalPointItem("primary")  # never added to reference_layer
+    assert scene.reference_layer.index_of(other) is None
+
+
+def test_index_of_scoped_to_typed_bucket(qapp):
+    scene = _scene(qapp)
+    layer = scene.composition_layer
+    fp = layer.add_focal_point("primary", QPointF(0, 0))
+    note = layer.add_note(QPointF(10, 10))
+    # Each type has its own bucket — a note is always index 0 within
+    # `notes`, regardless of how many focal points came before it.
+    assert layer.index_of(fp) == 0
+    assert layer.index_of(note) == 0
 
 
 # -- Scope: lock/visibility toggles are excluded from undo -------------------------

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsItemGroup, QGraphicsObject
+from PySide6.QtWidgets import QGraphicsItemGroup, QGraphicsObject
 
 from .. import constants as C
 
