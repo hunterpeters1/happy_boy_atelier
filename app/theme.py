@@ -256,27 +256,45 @@ def _stylesheet() -> str:
         color: {C.COLOR_INK_DIM};
     }}
 
+    /* A slim floating "pill" handle, no visible track — deliberately not
+    this app's usual square "machined panel plate" edges (see this file's
+    module docstring); the goal here is specifically to read as light and
+    unobtrusive, closer to a modern browser/macOS scrollbar, since it's
+    also fading in and out (app/scrollbars.py, via a QGraphicsOpacityEffect
+    applied at runtime — QSS itself has no transition/animation syntax).
+    Track width/height stays reserved at all times regardless of the fade,
+    so content never reflows when a scrollbar appears. */
     QScrollBar:vertical {{
-        background: {C.COLOR_BG_DARKEST};
-        width: 12px;
-        margin: 0;
+        background: transparent;
+        width: {C.SCROLLBAR_WIDTH_PX}px;
+        margin: 2px 0;
     }}
     QScrollBar::handle:vertical {{
         background: {C.COLOR_BG_RAISED};
-        border: 1px solid {C.COLOR_LINE};
-        min-height: 24px;
+        border-radius: {C.SCROLLBAR_WIDTH_PX // 2}px;
+        min-height: 28px;
     }}
     QScrollBar::handle:vertical:hover {{
-        background: {C.COLOR_LINE};
+        background: {C.COLOR_BRASS};
+    }}
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+        background: none;
     }}
     QScrollBar:horizontal {{
-        background: {C.COLOR_BG_DARKEST};
-        height: 12px;
+        background: transparent;
+        height: {C.SCROLLBAR_WIDTH_PX}px;
+        margin: 0 2px;
     }}
     QScrollBar::handle:horizontal {{
         background: {C.COLOR_BG_RAISED};
-        border: 1px solid {C.COLOR_LINE};
-        min-width: 24px;
+        border-radius: {C.SCROLLBAR_WIDTH_PX // 2}px;
+        min-width: 28px;
+    }}
+    QScrollBar::handle:horizontal:hover {{
+        background: {C.COLOR_BRASS};
+    }}
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+        background: none;
     }}
     QScrollBar::add-line, QScrollBar::sub-line {{
         width: 0; height: 0; border: none;

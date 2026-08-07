@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Read `README.md` before starting any task — it documents the full
+user-facing feature scope, including features that exist in the code but
+aren't obviously discoverable from the UI alone. Don't propose or plan a
+"new" feature without first checking whether it already exists there.
+
 ## What this is
 
 Happy Boy Atelier — a Windows desktop app (PySide6/Qt) for traditional

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Upload From Phone</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #16181d;
+      color: #f0f0f0;
+      padding: 24px;
+    }
+    form {
+      width: 100%;
+      max-width: 320px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      text-align: center;
+    }
+    h1 { font-size: 1.2rem; margin: 0 0 8px; }
+    input[type="text"] {
+      font-size: 1.6rem;
+      letter-spacing: 0.3em;
+      text-align: center;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #444;
+      background: #22252c;
+      color: inherit;
+    }
+    button {
+      font-size: 1rem;
+      padding: 12px;
+      border-radius: 10px;
+      border: none;
+      background: #4a7dff;
+      color: white;
+      cursor: pointer;
+    }
+    button:active { background: #3a67e0; }
+    .error { color: #ff6b6b; font-size: 0.9rem; margin: 0; }
+  </style>
+</head>
+<body>
+  <form method="post" action="{{ url_for('login') }}">
+    <h1>Enter the PIN shown on the laptop</h1>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <input
+      type="text"
+      name="pin"
+      inputmode="numeric"
+      pattern="[0-9]*"
+      maxlength="6"
+      autocomplete="off"
+      autofocus
+      required>
+    <button type="submit">Unlock</button>
+  </form>
+</body>
+</html>

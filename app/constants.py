@@ -152,3 +152,9 @@ COLOR_GUIDE = "#6b7480"             # rule of thirds / golden ratio — was
 
 FONT_FAMILY_UI = "Segoe UI"
 FONT_FAMILY_MONO = "Consolas"
+
+# Shared with theme.py's QScrollBar QSS (width/height of the slim pill
+# handle) and app/panels/layers_panel.py (right-margin clearance so
+# right-pinned row buttons never render under the scrollbar's stripe) —
+# one source of truth so the two can't drift out of sync.
+SCROLLBAR_WIDTH_PX = 8

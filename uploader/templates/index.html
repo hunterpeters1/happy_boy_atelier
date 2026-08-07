@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Upload From Phone</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #16181d;
+      color: #f0f0f0;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 1.1rem;
+      margin: 0 0 16px;
+      text-align: center;
+    }
+    .drop-zone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 2px dashed #4a7dff;
+      border-radius: 14px;
+      padding: 28px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .drop-zone.dragover { background: rgba(74, 125, 255, 0.15); }
+    .drop-zone .big { font-size: 1.05rem; font-weight: 600; }
+    .drop-zone .small { font-size: 0.85rem; color: #9aa0ab; }
+    /* Visually hidden but still rendered -- iOS Safari can fall back to
+       a bare Files browser (no Photo Library/Camera option) if the file
+       input is display:none when its label is tapped. */
+    input[type="file"] {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .status {
+      min-height: 1.4em;
+      text-align: center;
+      margin: 12px 0;
+      font-size: 0.9rem;
+      color: #9aa0ab;
+    }
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .gallery a {
+      display: block;
+      aspect-ratio: 1 / 1;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #22252c;
+    }
+    .gallery img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .empty {
+      text-align: center;
+      color: #9aa0ab;
+      margin-top: 24px;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Happy Boy Atelier &mdash; Upload From Phone</h1>
+
+  <label class="drop-zone" id="dropZone" for="fileInput">
+    <span class="big">Tap to choose photos</span>
+    <span class="small">or drag and drop here</span>
+    <input type="file" id="fileInput" accept="image/*" multiple>
+  </label>
+
+  <p class="status" id="status"></p>
+
+  <div class="gallery" id="gallery"></div>
+  <p class="empty" id="emptyState" hidden>No photos yet.</p>
+
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const dropZone = document.getElementById("dropZone");
+    const statusEl = document.getElementById("status");
+    const galleryEl = document.getElementById("gallery");
+    const emptyStateEl = document.getElementById("emptyState");
+
+    async function uploadFiles(files) {
+      const list = Array.from(files);
+      if (list.length === 0) return;
+
+      let succeeded = 0;
+      let failed = 0;
+      statusEl.textContent = `Uploading 0 / ${list.length}...`;
+
+      for (let i = 0; i < list.length; i++) {
+        const formData = new FormData();
+        formData.append("file", list[i]);
+        try {
+          const response = await fetch("/upload", { method: "POST", body: formData });
+          const data = await response.json();
+          if (data.ok) {
+            succeeded++;
+          } else {
+            failed++;
+          }
+        } catch (err) {
+          failed++;
+        }
+        statusEl.textContent = `Uploading ${i + 1} / ${list.length}...`;
+      }
+
+      statusEl.textContent = failed === 0
+        ? `${succeeded} photo${succeeded === 1 ? "" : "s"} uploaded.`
+        : `${succeeded} uploaded, ${failed} failed.`;
+
+      refreshGallery();
+    }
+
+    fileInput.addEventListener("change", () => {
+      uploadFiles(fileInput.files);
+      fileInput.value = "";
+    });
+
+    ["dragenter", "dragover"].forEach((eventName) => {
+      dropZone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        dropZone.classList.add("dragover");
+      });
+    });
+
+    ["dragleave", "drop"].forEach((eventName) => {
+      dropZone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        dropZone.classList.remove("dragover");
+      });
+    });
+
+    dropZone.addEventListener("drop", (event) => {
+      if (event.dataTransfer && event.dataTransfer.files.length) {
+        uploadFiles(event.dataTransfer.files);
+      }
+    });
+
+    function renderGallery(photos) {
+      galleryEl.innerHTML = "";
+      emptyStateEl.hidden = photos.length > 0;
+
+      for (const photo of photos) {
+        const link = document.createElement("a");
+        link.href = `/photos_dir/${encodeURIComponent(photo.filename)}`;
+        link.target = "_blank";
+        link.rel = "noopener";
+
+        const img = document.createElement("img");
+        img.src = photo.thumbnail
+          ? `/thumbnails/${encodeURIComponent(photo.thumbnail)}`
+          : `/photos_dir/${encodeURIComponent(photo.filename)}`;
+        img.loading = "lazy";
+        img.alt = photo.filename;
+
+        link.appendChild(img);
+        galleryEl.appendChild(link);
+      }
+    }
+
+    async function refreshGallery() {
+      try {
+        const response = await fetch("/photos");
+        const photos = await response.json();
+        renderGallery(photos);
+      } catch (err) {
+        // Next poll tick will retry.
+      }
+    }
+
+    refreshGallery();
+    setInterval(refreshGallery, 3000);
+  </script>
+</body>
+</html>

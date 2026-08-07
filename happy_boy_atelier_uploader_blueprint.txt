@@ -1,0 +1,218 @@
+HAPPY BOY ATELIER — PHOTO UPLOADER
+Implementation Blueprint
+=====================================================================
+
+PURPOSE
+-----------------------------------------------------------------
+Zero-install way for a phone to send photos to a laptop over local WiFi.
+Phone opens a URL in its normal browser (no app install), uploads a photo,
+and the file lands directly in a folder on the laptop. The same page shows
+a live-updating gallery of everything received, with thumbnail previews —
+including iPhone HEIC photos, which must be converted server-side to JPEG
+for preview purposes only (the original file on disk is never altered).
+
+This replaces an earlier plan to use AirDrop-compatible tooling (opendrop),
+which was ruled out due to AWDL/Bluetooth-LE triggering complexity on
+non-Apple hardware. This is a much simpler direct-HTTP-upload approach
+instead of peer-to-peer/WebRTC (also considered and ruled out, via
+Snapdrop) because peer-to-peer tools hand files to the browser's download
+mechanism and can't guarantee a specific destination folder or offer a
+built-in gallery.
+
+-----------------------------------------------------------------
+CORE REQUIREMENTS
+-----------------------------------------------------------------
+1. Zero install on the sending device (phone). Must work from a normal
+   mobile browser tab — no PWA install step required, no native app.
+2. Uploaded files must land in a specific folder on the host laptop,
+   unmodified (original bytes preserved, original format preserved).
+3. The host machine must show an in-app gallery / preview of received
+   images, not just a raw folder listing.
+4. HEIC/HEIF (iPhone default photo format) must be supported. Since most
+   browsers can't render HEIC as an <img>, the server must generate a
+   JPEG preview. This conversion must be fast — do NOT convert the full
+   original to a full-size JPEG; generate a small (~480px) thumbnail only,
+   which is what makes conversion fast even on large source photos.
+5. Runs on a single laptop, single trusted local WiFi network, single
+   photographer/operator context (no auth needed initially, but flag this
+   as a known gap — see CAVEATS).
+
+-----------------------------------------------------------------
+TECH STACK
+-----------------------------------------------------------------
+- Python 3 + Flask — lightweight, no build step, single process.
+- Pillow (PIL) — image decoding/resizing for thumbnails.
+- pillow-heif — adds HEIC/HEIF read support to Pillow via
+  `pillow_heif.register_heif_opener()`.
+- qrcode (optional but recommended) — prints a scannable QR code of the
+  local URL to the terminal on startup so there's zero typing on the phone.
+- No database. The filesystem is the source of truth — the folder
+  listing IS the data model.
+- No frontend framework. Single HTML page, vanilla JS, fetch() + polling.
+
+-----------------------------------------------------------------
+PROJECT LAYOUT
+-----------------------------------------------------------------
+happy-boy-atelier-uploader/
+  app.py                  Flask server (routes + thumbnail logic)
+  requirements.txt         Flask, Pillow, pillow-heif, qrcode
+  templates/
+    index.html             Combined upload UI + gallery UI, single page
+  photos/                  Created at runtime. Original uploaded files land
+                            here, named "<timestamp>-<shortid>.<ext>".
+  photos/.thumbnails/       Created at runtime. Generated JPEG previews,
+                            named "<timestamp>-<shortid>.jpg" (matches the
+                            stem of the original file for lookup).
+
+-----------------------------------------------------------------
+SERVER: ROUTES / BEHAVIOR SPEC
+-----------------------------------------------------------------
+GET  /
+  Renders templates/index.html. No server-side data needed at render time;
+  the page fetches gallery state itself via /photos.
+
+POST /upload
+  Multipart form upload, field name "file".
+  Steps:
+    1. Validate file present and extension is in the allow-list:
+       jpg, jpeg, png, heic, heif, webp (case-insensitive).
+    2. Build filename: f"{YYYYMMDD-HHMMSS}-{uuid4().hex[:6]}.{ext}"
+       (timestamp + short random suffix avoids collisions from rapid
+       uploads or same-second sends from multiple phones).
+    3. Save the original, unmodified, to photos/<filename>. This save
+       must happen before/independent of thumbnail generation, so a
+       thumbnail failure never prevents the original from landing.
+    4. Generate a thumbnail:
+         - Open the saved file with PIL.Image (pillow_heif's registered
+           opener transparently handles HEIC/HEIF here — no branching
+           needed in your code for format).
+         - .convert("RGB") (handles CMYK/palette/alpha edge cases so JPEG
+           save doesn't fail).
+         - .thumbnail((480, 480)) — in-place resize preserving aspect
+           ratio, capped at 480px on the long edge. This cap is the main
+           speed lever: bigger cap = slower conversion, especially for
+           HEIC decode.
+         - Save as JPEG, quality=82, to
+           photos/.thumbnails/<same-stem>.jpg
+       Wrap this whole step in try/except: if it fails (corrupt file,
+       unsupported HEIC variant, etc.), still return success for the
+       upload itself (file already landed) with thumbnail: null and a
+       warning field. Never let a bad thumbnail block the folder landing.
+    5. Return JSON: {ok: true, filename, thumbnail} (thumbnail may be null).
+
+GET  /photos
+  Returns JSON array of all valid files currently in photos/, newest
+  first (sort by file mtime descending). Each entry:
+    {filename, thumbnail (nullable), mtime}
+  This is the endpoint the gallery polls — no push/websocket needed,
+  simple polling (every ~3s) is sufficient at this scale and much
+  simpler to implement/debug.
+
+GET  /photos_dir/<filename>
+  Serves the original full-resolution file (for "tap thumbnail to view
+  full size" in the UI). Use Flask's send_from_directory, not a raw path
+  join, to avoid path traversal.
+
+GET  /thumbnails/<filename>
+  Serves a generated thumbnail, same send_from_directory pattern.
+
+Startup (main block, not a route):
+  - Detect the laptop's LAN IP (open a UDP socket to 8.8.8.8:80 and read
+    the local sockname — doesn't actually send traffic, just forces the
+    OS to pick the right outbound interface/IP).
+  - Print "http://<ip>:5000" to the terminal.
+  - If qrcode is installed, print an ASCII QR code of that URL so the
+    operator can scan straight from the terminal without typing.
+  - app.run(host="0.0.0.0", port=5000) — must bind 0.0.0.0, not
+    127.0.0.1/localhost, or the phone won't be able to reach it.
+
+-----------------------------------------------------------------
+FRONTEND SPEC (templates/index.html)
+-----------------------------------------------------------------
+Single page, two visual sections stacked vertically (mobile-first, this
+is primarily viewed on a phone screen):
+
+1. Upload zone
+   - A big tap/drag target. On mobile, an <input type="file" accept=
+     "image/*" multiple> inside a <label> gives native camera/photo
+     library access with zero extra code.
+   - Support drag-and-drop too (cheap to add, helps if someone tests
+     from a desktop browser).
+   - On file select/drop: POST each file individually to /upload via
+     fetch()/FormData. Show a status line ("Uploading...", then "N
+     photos uploaded" or partial failure count).
+   - After upload(s) complete, immediately trigger a gallery refresh
+     rather than waiting for the next poll tick — feels instant.
+
+2. Gallery grid
+   - CSS grid, auto-fill columns, square thumbnails (object-fit: cover).
+   - Poll GET /photos every 3 seconds; re-render the grid from the
+     response. Use the thumbnail URL if present, otherwise fall back to
+     the full-res original (covers the rare thumbnail-generation-failed
+     case gracefully instead of showing a broken image).
+   - Each thumbnail links to /photos_dir/<filename> (opens full-res in a
+     new tab) — acts as a lightweight lightbox without extra JS.
+   - Show an empty-state message ("No photos yet.") when the list is
+     empty.
+
+Keep it a single HTML file with inline <style> and <script> — no build
+step, no bundler, so it's trivial to hand-edit later.
+
+-----------------------------------------------------------------
+TESTING PLAN
+-----------------------------------------------------------------
+1. `python -m py_compile app.py` — sanity check before running.
+2. Unit-level check of the thumbnail function in isolation: generate a
+   synthetic JPEG with PIL, run it through the same resize/convert/save
+   logic used in make_thumbnail(), confirm output dimensions respect the
+   480px cap and aspect ratio is preserved.
+3. Unit-level check of allowed_file() against a mix of valid/invalid
+   extensions (including uppercase, e.g. "IMG.HEIC") and no-extension
+   filenames.
+4. Full integration test (needs real network access for pip installs,
+   so run this on the actual target laptop, not a sandboxed/offline
+   environment):
+     - pip install -r requirements.txt
+     - python app.py
+     - From another device on the same WiFi (or curl locally), POST a
+       real HEIC file (an actual iPhone photo) to /upload and confirm:
+         a) the original HEIC lands unmodified in photos/
+         b) a JPEG thumbnail appears in photos/.thumbnails/
+         c) /photos reflects it, and the gallery page renders it
+     - Time the HEIC upload-to-thumbnail-visible latency; if it's
+       noticeably slow on typical photo sizes, that's the signal to move
+       thumbnail generation to a background thread (see CAVEATS) rather
+       than doing it inline before the HTTP response.
+5. Confirm the printed LAN URL / QR code is actually reachable from a
+   phone on the same WiFi (this is the step most likely to break due to
+   router client-isolation settings — test this early, not last).
+
+-----------------------------------------------------------------
+CAVEATS / KNOWN GAPS (carry these forward, don't silently fix them)
+-----------------------------------------------------------------
+- No authentication. Anyone on the same WiFi network with the URL can
+  upload files. Acceptable for a single trusted-network setup; if this
+  ever runs on a semi-public network (event guest WiFi, etc.), add a
+  simple shared PIN/token check on /upload before treating this as
+  production-ready.
+- No auth also means no per-user attribution — all uploads are
+  anonymous/unattributed in the current design.
+- Same-WiFi requirement is hard. This is plain LAN HTTP, not a cloud
+  relay. Guest/event WiFi networks that enable client isolation (phones
+  can't see other devices on the same network) will break this entirely
+  — worth testing on the actual venue network before relying on it live.
+- Thumbnail generation currently happens synchronously inside the
+  /upload request/response cycle. This was an accepted tradeoff for
+  simplicity given the 480px cap keeps it fast at expected volume (one
+  photographer, one device at a time). If usage scales up (multiple
+  people uploading large photos simultaneously) and the UI starts to
+  feel laggy, the fix is to return the "file received" response
+  immediately and generate the thumbnail in a background thread,
+  updating a status field the gallery polls for.
+- No retry/resume on failed uploads — if a transfer drops mid-way, the
+  user just has to re-select and re-upload the file. No partial-upload
+  cleanup logic exists yet (a failed/aborted upload could theoretically
+  leave a truncated file in photos/ — worth adding a check for this if
+  it comes up in practice).
+- Port defaults to 5000 — if that's already in use on the target
+  laptop, change the `port` variable in app.py's __main__ block.

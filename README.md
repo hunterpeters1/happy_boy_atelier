@@ -2,7 +2,7 @@
 
 A digital drafting table for traditional painters. Prepare a physical
 painting before you touch the canvas: pick a format, arrange reference
-photos, plan composition, perspective, and lighting. It is not a painting app and not an image
+photos, and plan composition, perspective, and lighting. It is not a painting app and not an image
 generator — every mark on the canvas is placed by the artist.
 
 See `ARCHITECTURE.md` for the technical design.
@@ -74,37 +74,222 @@ over SSH. `tests/test_project.py` has no Qt dependency at all;
 `tests/test_atelier_io.py` and `tests/test_undo_commands.py` exercise real
 `.atelier` files and a real `CanvasScene` respectively.
 
-## Quick tour
+## Feature tour
 
-- **Start screen** — on launch, if you have recent paintings, pick one by
-  its thumbnail, start a new one, or open something else. A fresh
-  install skips straight to a blank canvas.
-- **File > New Painting…** — width/height/unit are always visible and
-  editable; portrait/landscape/square presets just fill them in, no
-  separate "custom" mode to switch into.
-- **Import** — bring in reference photos via the dialog, or just drag
-  image files from your OS straight onto the canvas. Each becomes its
-  own object you can drag (snaps to the canvas center and to other
-  images' centers — hold Alt/Option to bypass), resize (corner
-  handles — free by default, hold Shift to lock proportions), rotate
-  (handle above the image, hold Shift to snap to 15°), or crop
-  (Properties panel, or right-click the image).
-- **Project Panel** (left dock) — one outliner: every layer, and every
-  item placed in it — not just reference images — as a named, searchable
-  row with inline visibility/lock toggles.
-- **Properties** (right dock) — edit whatever is currently selected;
-  select several items for relative opacity/scale nudges and alignment.
-- **Ctrl+K** — command palette, searches every menu action by name.
-- **Right-click** an item for Delete/Lock/Crop…, or empty canvas for Fit
-  Canvas.
-- **Edit > Lock Setup** — freezes every layer so nothing moves by accident
-  once the plan is final.
-- **File > Save / Open / Open Recent** — projects are single portable
-  `.atelier` files; reference images are embedded, never linked
-  externally.
-- **File > Export…** — PNG, JPG, or a one-page PDF planning sheet, on one
-  panel with the destination pre-filled from the project name.
+The app has more surface area than the toolbar suggests — several tools
+only exist as buttons inside the **Project Panel** (left dock), not the
+menu bar or toolbar. This section is written to be exhaustive; if you're
+looking for "is there a way to…", check here before assuming there isn't.
 
+### Getting started
+
+- **Start screen** — on launch, if you have recent paintings and there's
+  no crash to recover (see below), pick one by its embedded thumbnail,
+  start a new one, or open something else. A fresh install skips straight
+  to a blank canvas.
+- **File > New Painting…** (Ctrl+N) — width/height/unit are always
+  visible and editable; portrait/landscape/square presets just fill them
+  in, no separate "custom" mode to switch into.
+- **Import** — File > Import Reference Image(s)… (Ctrl+I), or drag image
+  files from your OS straight onto the canvas (multiple at once is fine —
+  it's one undo step either way). Supported: PNG, JPG/JPEG, BMP, WEBP.
+  **HEIC/HEIF is not supported here** — Qt has no HEIC decoder, so those
+  files are silently ignored by drag-and-drop. Convert HEIC to JPEG first
+  (the `uploader/` tool below does this automatically for phone photos).
+
+### Reference images
+
+Each imported photo is its own object:
+
+- **Drag** to move — snaps its center to the canvas center or to any
+  other *visible* reference image's center; hold **Alt** to bypass
+  snapping.
+- **Resize** via corner handles — free (independent width/height) by
+  default; hold **Shift** to lock aspect ratio.
+- **Rotate** via the handle above the image; hold **Shift** to snap to
+  15° increments.
+- **Crop** — Properties panel "Crop…" button, or right-click → Crop…
+  (disabled on locked images). Shows a draggable crop rectangle with its
+  own Apply/Cancel controls; Esc also cancels.
+- **Study Blur** — Properties panel has **Blur** and **Line Clarity**
+  sliders (0–100) per image. This is a "squint test": blurs the image
+  while boosting contrast on dark edges/lines, so you can judge overall
+  shapes and values without fine detail pulling your eye. It's a display
+  filter only — the saved image is never altered — and is **not included
+  in exports by default**; the Export dialog has an explicit "Include
+  Study Blur effect" checkbox if you want it baked into a specific
+  export.
+
+### Composition tools
+
+Placed via tool buttons at the top of the **Project Panel's Composition
+section** (not the toolbar):
+
+- **Focal point (primary / secondary)** — one click on canvas places a
+  crosshair marker; primary is filled/brighter, secondary is hollow.
+- **Movement line** — click-drag-click: first click sets the start,
+  second sets the end, with a dashed preview line following your cursor
+  in between. Draws an arrowed path showing how the eye should move
+  through the composition.
+- **Note** — click to place a pin marker with an editable text label;
+  double-click it on canvas, or use the Properties panel's text box, to
+  edit.
+
+Any armed tool shows a crosshair cursor; **Esc** or right-click → "Cancel
+Tool" backs out without placing anything.
+
+### Perspective tools
+
+Live entirely inside the **Project Panel's Perspective section** — there
+is no toolbar or menu entry for this at all. The layer starts hidden on a
+new project until you pick a mode:
+
+- **1-pt / 2-pt / 3-pt mode** — radio buttons; switching modes
+  auto-creates the horizon line and the matching vanishing point(s).
+- **Horizon line** — drag vertically (its horizontal position is fixed);
+  exact Y position is also editable numerically in the Properties panel.
+- **Vanishing points** (VP1–VP3 depending on mode) — draggable, with
+  construction grid lines radiating from each; also editable by exact
+  X/Y in the Properties panel.
+- **Grid lines** spinbox (2–48) — how many construction lines per
+  vanishing point.
+- **Line weight** spinbox (1.0–8.0) — thicken the lines if you're
+  projecting the grid onto a wall/canvas and fine lines wash out.
+- **Opacity** slider for the whole perspective overlay.
+
+### Lighting tools
+
+Also placed via tool buttons in the **Project Panel's Lighting section**:
+
+- **Light source** — one click, places a sunburst marker.
+- **Light direction arrow** / **Shadow direction arrow** — click-drag-click
+  like movement lines; uniquely, these two support dragging each endpoint
+  independently after placement (small square handles), not just moving
+  the whole arrow.
+- **Note** — same as composition notes, lighting-colored.
+
+### Guides
+
+Project Panel's **Guides** section has two checkboxes — **Rule of
+Thirds** and **Golden Ratio** overlays. Purely visual, always drawn on
+top, nothing to place or select.
+
+### Selecting, organizing, and editing
+
+- **Project Panel** (left dock) — one outliner listing every layer and
+  every item placed in it (not just reference images), each a named,
+  searchable row with inline visibility/lock toggles. A search box at
+  the top filters items by name across all layers. Reference/composition/
+  lighting rows have up/down buttons to reorder within their layer's
+  stacking position (perspective and guide items don't reorder).
+- **Properties panel** (right dock) — edits whatever's currently
+  selected. Select 2+ items to get a **Batch Edit** section: opacity
+  nudges (±5%), scale nudges (×0.95/×1.05, only shown if every selected
+  item supports scaling), and **align left/right/top/bottom** buttons
+  that line up all selected items to the group's min/max edge.
+- **Right-click** an item for Delete / Lock / Unlock, and Crop… (reference
+  images only); right-click empty canvas for Fit Canvas, plus Cancel Tool
+  if one's armed.
+- **Ctrl+K** — command palette. It's built by walking the entire live
+  menu bar, so *every* menu action is searchable there, including ones
+  that are easy to forget exist (Show Rulers, Appearance themes, etc.).
+
+### Workspace
+
+- **Pan** — hold Space and drag, or drag with the middle mouse button.
+- **Zoom** — plain mouse wheel (no modifier needed), 5%–2400% range;
+  View > Zoom In/Out (Ctrl+=/Ctrl+-) or Fit Canvas (Ctrl+0).
+- **Rulers** — View > Show Rulers (Ctrl+R), on by default.
+
+### Locking
+
+Two independent lock mechanisms:
+
+- **Per-item / per-layer locks** — padlock icons in the Project Panel.
+  Lock a layer and its contents stay visible but stop being
+  draggable/selectable.
+- **Edit > Lock Setup** (Ctrl+L, also a toolbar toggle) — a global lock
+  for when the plan is final. Freezes every layer regardless of
+  individual lock states, disables the Project Panel entirely, cancels
+  any active tool, and shows a permanent "SETUP LOCKED" banner in the
+  status bar. Turning it back off restores whatever the individual
+  per-layer locks were set to before. This state is saved in the file but
+  deliberately excluded from Undo/Redo.
+
+### Saving, opening, and crash recovery
+
+- **File > Save / Save As / Open / Open Recent** — projects are single
+  portable `.atelier` files (a zip: manifest + embedded reference images
+  + thumbnail) — nothing is ever a link to an external file, so a
+  `.atelier` file is self-contained and safe to move or send. Recent
+  Files quietly drops entries whose files were since moved or deleted.
+- **Crash recovery** — the app silently autosaves every 3 minutes to a
+  single fixed recovery slot (separate from your own save files), but
+  only while there's unsaved work. If the app didn't exit cleanly last
+  time (crash, force-quit, power loss), the *next* launch shows a prompt
+  — before the start screen — offering to recover that snapshot or
+  discard it. A recovered project opens unsaved (no file path attached);
+  the recovery snapshot itself isn't deleted until you do save, so a
+  second crash before then doesn't lose the recovery again.
+
+### Exporting
+
+**File > Export…** (Ctrl+E), one panel, destination pre-filled from the
+project name and updated live as you change format:
+
+- **PNG or JPG** at a chosen **Output DPI** (72–1200, default 300).
+- **PDF Planning Sheet** — a single-page, letter-size, 300dpi PDF with
+  the canvas rendered at the top and a bulleted list of every
+  composition and lighting note's text underneath, meant to print and
+  bring to the easel. (DPI setting doesn't apply to PDF — it's vector.)
+- **Include Study Blur effect** checkbox (off by default) — bakes each
+  reference image's current Blur/Line Clarity sliders into that export
+  only; the saved project and any thumbnails are never affected.
+
+### Appearance
+
+View > Appearance offers Light, Dark, Current (matches OS), and **Hack
+Mode**. Hack Mode is a developer/debug theme — switching to it also adds
+a **Debug menu** (verbose console logging, a live scene-stats readout in
+the status bar, reload stylesheet) and a decorative status-bar widget.
+Harmless to poke at, but not part of the normal painting workflow.
+
+## Upload from Phone
+
+`uploader/` is a small, **standalone** tool (its own dependencies, its
+own venv — deliberately not part of the desktop app or its PyInstaller
+build) for getting phone photos onto this machine over local WiFi with no
+app install on the phone:
+
+```
+cd uploader
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python app.py
+```
+
+It prints a URL, a QR code, and a one-time PIN. Scan the QR (or type the
+URL) from a phone **on the same WiFi network**, enter the PIN once, then
+upload photos through the browser — they land in `uploader/photos/` with
+a live gallery/thumbnail preview on the same page. HEIC/HEIF photos
+(the iPhone default) are automatically converted to a full-resolution
+JPEG and the original HEIC is discarded, since Qt can't decode HEIC and
+a raw `.heic` file can't be imported into the atelier app at all. Every
+other format lands unmodified.
+
+From there, bring photos into a project the normal way: File > Import
+Reference Image(s)… (or drag-and-drop) pointed at `uploader/photos/`.
+There's no automatic link between the uploader and an open project —
+by design, so switching to a different phone-transfer method later
+doesn't require touching the app.
+
+Known limitations: no authentication beyond the one-time PIN (fine for a
+single trusted home network, not for a public/guest WiFi); requires the
+phone and laptop to actually be on the same network segment — a WiFi
+mesh extender/satellite or a phone's "Private WiFi Address" setting can
+put the phone on an isolated subnet that can't reach the laptop even
+though it looks like the same network.
 
 ## Status
 

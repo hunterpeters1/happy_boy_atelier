@@ -14,6 +14,7 @@ from PySide6.QtGui import QFontDatabase, QIcon
 from PySide6.QtWidgets import QApplication
 
 from app import constants as C
+from app import scrollbars
 from app import themes
 from app.main_window import MainWindow
 from app.resources import app_icon_path, space_grotesk_font_path
@@ -52,11 +53,12 @@ def main() -> int:
     theme_mode = _load_theme_mode()
     themes.apply_palette(theme_mode)
     apply_theme(app)
+    scrollbars.install(app)
 
     window = MainWindow(theme_mode=theme_mode)
     if not icon.isNull():
         window.setWindowIcon(icon)
-    window.show()
+    window.showMaximized()
 
     return app.exec()
 
