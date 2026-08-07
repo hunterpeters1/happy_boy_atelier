@@ -14,6 +14,13 @@ user-facing feature scope, including features that exist in the code but
 aren't obviously discoverable from the UI alone. Don't propose or plan a
 "new" feature without first checking whether it already exists there.
 
+Check the repo root for a `proposal.txt` at the start of any session —
+Hermes drops audits, findings, or questions there for architecture
+review (per `TEAM_ROLES.md`'s division of labor). It's not committed
+(stays untracked in `git status`), so nothing in `git log` will surface
+its presence or flag that it changed. If it exists, review it before
+starting other work — it may be blocking Hermes on an answer.
+
 ## What this is
 
 Happy Boy Atelier — a Windows desktop app (PySide6/Qt) for traditional
