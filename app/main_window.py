@@ -364,6 +364,14 @@ class MainWindow(QMainWindow):
         self._add_action(edit_menu, "Magnify 2×", None, self._magnify_selected)
         self._add_action(edit_menu, "Shrink to 50%", None, self._demagnify_selected)
         edit_menu.addSeparator()
+        # Unlike Flip/Magnify above, this applies to every visible,
+        # unlocked reference image at once, not the current selection —
+        # the "squint at the whole board" use case Value Check exists for.
+        self._add_action(
+            edit_menu, "Toggle Value Check (All References)", None, self._toggle_grayscale_all,
+            icon_name="contrast",
+        )
+        edit_menu.addSeparator()
         self.lock_action = self._add_action(
             edit_menu, "Lock Setup", "Ctrl+L", self.toggle_lock_setup, checkable=True, icon_name="lock"
         )
@@ -918,6 +926,11 @@ class MainWindow(QMainWindow):
             return
         self.scene.send_to_back_selected()
         self.properties_panel.refresh()
+
+    def _toggle_grayscale_all(self) -> None:
+        if self.scene is None:
+            return
+        self.scene.toggle_grayscale_all()
 
     def _flip_horizontal(self) -> None:
         if self.scene is None:

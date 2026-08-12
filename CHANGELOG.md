@@ -7,10 +7,9 @@ makes each of *their* UIs distinctive, then deliberately not copying
 either — deepening the existing brass/graphite instrument-panel identity
 and finishing several pieces the prior UX redesign explicitly cut for
 scope. See `V2_ROADMAP.md`'s Section 7 and `ARCHITECTURE.md` for the full
-design rationale. Landed in phases; this is Phase 1 (lowest-risk,
-highest-identity-payoff — nothing here touches undo/serialization).
+design rationale. Landed in phases.
 
-### Phase 1
+### Phase 1 (lowest-risk, highest-identity-payoff — nothing touches undo/serialization)
 - **Rule of Thirds / Golden Ratio intersection snapping** — dragging a
   reference image now also snaps to a guide intersection while that guide
   is turned on, alongside the existing canvas-center/other-image-center
@@ -27,6 +26,24 @@ highest-identity-payoff — nothing here touches undo/serialization).
   every dock's title bar (`app/panels/dock_title_bar.py`), and
   print-production-style trim marks plus a live physical-dimension
   readout on the canvas corners (`CanvasView.drawForeground()`).
+
+### Phase 2 (mission-critical content features — the two items `V2_ROADMAP.md` itself called out as highest-fit-and-not-yet-started)
+- **On-canvas measurement tool** — a ruler-and-protractor composition
+  marker (`MeasurementItem`, Project Panel's Composition section): place
+  via click-drag-click like a movement line, reporting live length (in
+  the canvas's own unit) and angle from horizontal. Drag either endpoint
+  independently afterward; hold Shift to snap the angle to 15° increments.
+  Persists, undoes, and exports like any other composition marker.
+  Endpoint dragging is now shared infrastructure (`TwoPointHandle`,
+  `app/canvas/point_handle.py`) — `DirectionArrowItem` (lighting layer)
+  was refactored onto the same class instead of keeping its own copy.
+- **Value Check** — a third Study Blur–family slider
+  (`ReferenceImageItem.grayscale_amount()`) that non-destructively
+  desaturates a reference image, for judging value relationships without
+  color as a distraction; composes with Blur/Line Clarity in one pass.
+  **Edit > Toggle Value Check (All References)** flips every visible,
+  unlocked reference image at once as one undo step — "squint at the
+  whole board," not just one photo.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

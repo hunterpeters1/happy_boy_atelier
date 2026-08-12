@@ -44,11 +44,13 @@ happy_boy_atelier/
       selection.py               select_on_left_click() — routes clicks into CanvasScene's selection API
       undo_commands.py          QUndoCommand classes (content mutations only — see Undo/redo below)
       handle_frame.py           reusable interactive transform box (move/scale/rotate handles)
+      point_handle.py            TwoPointHandle: shared draggable endpoint handle for two-point
+                                 markers (DirectionArrowItem, MeasurementItem)
       resize_math.py            corner-drag resize math (anchor/rotation-aware)
     layers/
       reference_layer.py        ReferenceImageItem + ReferenceLayerGroup (import, crop, opacity, lock,
                                  rotation/position snapping)
-      composition_layer.py      FocalPointItem, MovementLineItem, NoteItem
+      composition_layer.py      FocalPointItem, MovementLineItem, MeasurementItem, NoteItem
       perspective_layer.py      HorizonLineItem, VanishingPointItem, PerspectiveGridItem (1/2/3-pt)
       lighting_layer.py         LightSourceItem, DirectionArrowItem, NoteItem (reused)
       guide_overlay.py          RuleOfThirdsOverlay, GoldenRatioOverlay (non-interactive, top z-order)
@@ -210,6 +212,31 @@ guarded so it only applies during an actual interactive drag, never to a
 programmatic `setPos()` from undo/redo, batch align, or the Inspector's
 position fields.
 
+## Two-point markers: the shared endpoint handle
+
+`DirectionArrowItem` (`app/layers/lighting_layer.py`) and `MeasurementItem`
+(`app/layers/composition_layer.py`, the on-canvas ruler/angle tool) are
+both two-endpoint markers whose endpoints drag independently after
+placement, via small square handles — `TwoPointHandle`
+(`app/canvas/point_handle.py`). Extracted to that shared location (not
+either layer module) specifically because composition_layer.py and
+lighting_layer.py already have a one-way import relationship (lighting
+imports `NoteItem` from composition), so a handle class defined in either
+layer module couldn't be reached from the other without a cycle. `owner`
+just needs to expose `points()`/`set_point(which, local)`/
+`set_points(points)`/`color()`; the handle owns press/move/release, and
+release pushes exactly one `SetPropertyCommand(owner.set_points, old, new,
+label)` if anything actually changed. `MeasurementItem.set_point()` adds
+one thing `DirectionArrowItem` doesn't: while Shift is held, the dragged
+endpoint's angle around the *other* endpoint snaps to the nearest
+`ROTATION_SNAP_DEG` (`_snap_to_angle()`, same round-to-nearest pattern
+`reference_layer.py`'s rotate-handle snap already uses, applied to an
+endpoint-around-a-pivot instead of a whole-image rotation). A
+`MeasurementItem`'s length/angle label is never stored — `display_label()`
+computes it fresh from the two points every time, in the canvas's own
+display unit (`CanvasSpec.unit`), so there's no shadow value that could
+drift from the geometry.
+
 ## Modes
 
 - **Draft mode** (default): full editing, all panels visible.
@@ -342,6 +369,33 @@ rounded shapes, matching this file's "machined panel plate" rule):
   labeled technical artifact — the app's ownable identity marker, since
   neither PureRef's chrome-less canvas nor Milanote's card-based one
   frames its content this way.
+
+## Value Check (`app/canvas/study_blur.py`, `app/layers/reference_layer.py`)
+
+A non-destructive per-image desaturate, extending the Study Blur family
+(Blur/Line Clarity) with a third slider rather than a parallel mechanism:
+`apply_study_effect()` gained a `grayscale_pct` parameter, applied
+*before* blur/clarity so a squint-test and a value-check compose in one
+pass sharing one processed-pixmap cache (`ReferenceImageItem.
+_processed_cache_key` is now `(blur, clarity, grayscale, crop)` — note the
+index shift this caused in `_get_processed_display_pixmap()`'s own
+crop-changed check). `ReferenceImageItem.grayscale_amount()`/
+`set_grayscale_amount()` mirror `blur_amount()`/`set_blur_amount()`
+exactly, including reuse of the same `set_defer_blur_refresh()` flag
+during an active Properties-panel slider drag — one deferred-recompute
+flag already covers "any of the three sliders is mid-drag." Serialized as
+a `"grayscale"` key on reference entries, defaulting to `0.0` for every
+pre-existing `.atelier` file; exported only when the artist opts in via
+the Export dialog's existing "Include Study Blur effect" checkbox
+(`export_study_effect`) — no second export flag.
+
+`CanvasScene.toggle_grayscale_all()` (Edit menu: "Toggle Value Check (All
+References)") is a macro over the same per-item `SetPropertyCommand` the
+Properties panel's slider already pushes, one command per visible+
+unlocked reference image — there is deliberately no second, scene-wide
+boolean anywhere; "is the layer grayscale" is derived from actual
+per-item state (majority already on → turn all off, else turn all on)
+each time the action runs, not shadowed.
 
 ## Export
 

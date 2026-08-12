@@ -228,39 +228,58 @@ through `None` even for normal on-screen `QGraphicsView` painting under
 the offscreen QPA platform tests run under), which is why this explicit
 flag exists instead of the more obvious-looking shortcut.
 
-**Study Blur (`app/canvas/study_blur.py`):** a per-reference-image,
-non-destructive "squint test" filter — blur the displayed image while
-boosting the contrast of dark lines/edges so they stay legible even at
-very low contrast, via `apply_study_effect()`, a pure numpy function (this
-app's first and only dependency beyond PySide6) with no Qt/item coupling,
-same spirit as `resize_math.py`. `ReferenceImageItem.blur_amount()`/
-`line_clarity()` are plain 0-100 float fields (`to_dict`/`from_dict` keys
-`"blur"`/`"line_clarity"`, defaulting to 0.0 for every pre-existing
-`.atelier` file) driving a separately-cached processed pixmap
-(`_get_processed_display_pixmap()`/`_refresh_processed_pixmap()`),
+**Study Blur / Value Check (`app/canvas/study_blur.py`):** a
+per-reference-image, non-destructive "squint test" filter family — blur
+the displayed image while boosting the contrast of dark lines/edges so
+they stay legible even at very low contrast, plus a third sibling,
+Value Check, that desaturates toward luminance for judging value
+relationships without color — via `apply_study_effect(image, blur_pct,
+clarity_pct, grayscale_pct)`, a pure numpy function (this app's first and
+only dependency beyond PySide6) with no Qt/item coupling, same spirit as
+`resize_math.py`. Grayscale is applied *first*, before blur/clarity, so
+all three compose in one pass sharing one cache rather than needing a
+second pipeline. `ReferenceImageItem.blur_amount()`/`line_clarity()`/
+`grayscale_amount()` are plain 0-100 float fields (`to_dict`/`from_dict`
+keys `"blur"`/`"line_clarity"`/`"grayscale"`, each defaulting to 0.0 for
+every pre-existing `.atelier` file) driving a separately-cached processed
+pixmap (`_get_processed_display_pixmap()`/`_refresh_processed_pixmap()`),
 processed at an even smaller `BLUR_WORKING_DIM` than the display proxy
 above and scaled back up — the numpy pass is real work (~100ms+ even
 capped), measured at the better part of a second at full display-proxy
-resolution. Recomputing this synchronously on every Properties-panel
-slider tick would reintroduce exactly the per-frame-cost problem the
-paragraph above fixed, so `ReferenceImageItem.set_defer_blur_refresh()`
-lets `PropertiesPanel` suppress the setters' normal immediate-recompute
+resolution. `_processed_cache_key` is `(blur, clarity, grayscale, crop)`
+— crop lives at index 3, not 2, so if you're touching
+`_get_processed_display_pixmap()`'s own crop-changed check, re-check that
+index rather than assuming it's still where it was before grayscale was
+added. Recomputing this synchronously on every Properties-panel slider
+tick would reintroduce exactly the per-frame-cost problem the paragraph
+above fixed, so `ReferenceImageItem.set_defer_blur_refresh()` lets
+`PropertiesPanel` suppress the setters' normal immediate-recompute
 behavior for the duration of an active slider drag, batching to a
 debounced timer plus one forced recompute on release — every *other*
-caller of `set_blur_amount()`/`set_line_clarity()` (undo/redo, project
-load) is not deferred and always recomputes immediately, or the cache
-goes stale relative to the actual current values. Never baked into
-exports unless the artist opts in via the Export dialog's checkbox
-(`ExportDialog.include_study_effect()` → `CanvasScene.
-export_study_effect`, a second flag alongside `rendering_for_export`,
-also reset in `finally` — thumbnails must never pick it up).
+caller of `set_blur_amount()`/`set_line_clarity()`/
+`set_grayscale_amount()` (undo/redo, project load) is not deferred and
+always recomputes immediately, or the cache goes stale relative to the
+actual current values. Never baked into exports unless the artist opts in
+via the Export dialog's checkbox (`ExportDialog.include_study_effect()` →
+`CanvasScene.export_study_effect`, a second flag alongside
+`rendering_for_export`, also reset in `finally` — thumbnails must never
+pick it up). `CanvasScene.toggle_grayscale_all()` (Edit menu) is a macro
+of the same per-item `SetPropertyCommand` the slider itself pushes over
+every visible+unlocked reference image — there's no second, scene-wide
+grayscale flag anywhere; "mostly on" vs. "mostly off" is derived from
+actual per-item state each call.
 
 **Modes:** Draft (default, full editing) → Locked setup
 (`Project.locked = True`, freezes every layer, explicit unlock required).
-Projector mode (a separate fullscreen snapshot view of the reference
-layer) existed through the UX redesign below but has since been removed
-entirely, including its `.atelier` `projector_state` manifest field —
-don't reintroduce a manifest field or menu item for it without checking
+Focus Mode (`MainWindow.toggle_focus_mode()`, View menu, Ctrl+Shift+F) is
+a separate, UI-chrome-only toggle — not `Project`/undo-stack state —
+hiding the toolbar and every dock down to just the canvas and menu bar,
+restoring each dock's exact prior visibility (not a blanket re-show) on
+exit. Projector mode (a separate fullscreen snapshot view of the
+reference layer) existed through the UX redesign below but has since
+been removed entirely, including its `.atelier` `projector_state`
+manifest field — don't reintroduce a manifest field or menu item for it
+without checking
 whether the removal was deliberate for the specific task at hand.
 
 **Export (`app/atelier_io.py`, `app/dialogs/export_dialog.py`):** PNG/JPG

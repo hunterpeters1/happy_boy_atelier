@@ -1,11 +1,13 @@
-"""Pure-numpy image processing for the reference-image "Study Blur"
-feature: blur the image (a painter's classic squint-test for judging
-overall shapes/values without being distracted by fine detail) while
-boosting the local contrast of dark lines/edges so they stay legible even
-at very low contrast, instead of getting washed out by the blur. No
-QGraphicsItem/widget coupling — mirrors canvas/resize_math.py's pattern of
-independently-testable pure logic kept separate from the Qt item classes
-that use it (see layers/reference_layer.py).
+"""Pure-numpy image processing for the reference-image "Study Blur" and
+"Value Check" features: blur the image (a painter's classic squint-test
+for judging overall shapes/values without being distracted by fine
+detail) while boosting the local contrast of dark lines/edges so they
+stay legible even at very low contrast, instead of getting washed out by
+the blur; and non-destructively desaturate toward luminance for judging
+value relationships without color as a confound. No QGraphicsItem/widget
+coupling — mirrors canvas/resize_math.py's pattern of independently-
+testable pure logic kept separate from the Qt item classes that use it
+(see layers/reference_layer.py).
 """
 
 from __future__ import annotations
@@ -71,21 +73,36 @@ def _box_blur(image: np.ndarray, radius: int) -> np.ndarray:
     return total / (size * size)
 
 
-def apply_study_effect(image: QImage, blur_pct: float, clarity_pct: float) -> QImage:
-    """blur_pct/clarity_pct: 0-100, matching the Properties panel sliders
-    (and the existing opacity-slider convention elsewhere in this app).
-    `(0, 0)` returns `image` unchanged — a guaranteed fast no-op path so
-    images nobody has adjusted pay zero processing cost.
+def apply_study_effect(
+    image: QImage, blur_pct: float, clarity_pct: float, grayscale_pct: float = 0.0
+) -> QImage:
+    """blur_pct/clarity_pct/grayscale_pct: 0-100, matching the Properties
+    panel sliders (and the existing opacity-slider convention elsewhere in
+    this app). `(0, 0, 0)` returns `image` unchanged — a guaranteed fast
+    no-op path so images nobody has adjusted pay zero processing cost.
+
+    grayscale_pct lerps each pixel toward its own luminance -- a
+    non-destructive "Value Check" desaturate -- applied *before*
+    blur/clarity so a squint-test and a value-check can be judged on the
+    same photo at once, sharing the one processed-pixmap cache
+    ReferenceImageItem already maintains, rather than needing a second,
+    independent effect pipeline.
     """
     blur_pct = max(0.0, min(100.0, blur_pct))
     clarity_pct = max(0.0, min(100.0, clarity_pct))
-    if blur_pct <= 0 and clarity_pct <= 0:
+    grayscale_pct = max(0.0, min(100.0, grayscale_pct))
+    if blur_pct <= 0 and clarity_pct <= 0 and grayscale_pct <= 0:
         return image
 
     arr = _qimage_to_array(image)
     rgb = arr[:, :, :3].astype(np.float32)
     h, w = rgb.shape[:2]
     short_edge = max(1, min(h, w))
+
+    if grayscale_pct > 0:
+        t = grayscale_pct / 100.0
+        luminance = (rgb @ _LUMA)[:, :, None]
+        rgb = rgb * (1 - t) + luminance * t
 
     # Radius scales with both the slider and the image's own size, so the
     # effect feels consistent across differently-sized crops rather than a

@@ -54,7 +54,7 @@ from .. import scrollbars
 from ..constants import LayerKind, PerspectiveMode
 from ..canvas.undo_commands import SetPerspectiveModeCommand, SetPropertyCommand
 from ..layers.reference_layer import ReferenceImageItem
-from ..layers.composition_layer import FocalPointItem, MovementLineItem, NoteItem
+from ..layers.composition_layer import FocalPointItem, MeasurementItem, MovementLineItem, NoteItem
 from ..layers.lighting_layer import LightSourceItem, DirectionArrowItem
 from ..layers.perspective_layer import VanishingPointItem, HorizonLineItem
 from .row_hover import install_row_hover
@@ -88,6 +88,8 @@ def _row_icon_and_label(item) -> tuple[str, str]:
         return "focal", f"Focal point · {item.kind}"
     if isinstance(item, MovementLineItem):
         return "movement", "Movement line"
+    if isinstance(item, MeasurementItem):
+        return "ruler", item.display_label()
     if isinstance(item, NoteItem):
         text = item.text().strip() or "Note"
         return "note", (text if len(text) <= 32 else text[:31] + "…")
@@ -580,6 +582,7 @@ class LayersPanel(QWidget):
             ("focal_primary", "focal", "Add primary focal point"),
             ("focal_secondary", "focal", "Add secondary focal point"),
             ("movement_line", "movement", "Add movement line — click a start point, then an end point"),
+            ("measure", "ruler", "Add measurement — click a start point, then an end point"),
             ("note_comp", "note", "Add note"),
         ])
         layer = self.scene.composition_layer
@@ -587,6 +590,8 @@ class LayersPanel(QWidget):
             self._add_item_row(parent, fp, layer)
         for line in reversed(layer.movement_lines):
             self._add_item_row(parent, line, layer)
+        for measurement in reversed(layer.measurements):
+            self._add_item_row(parent, measurement, layer)
         for note in reversed(layer.notes):
             self._add_item_row(parent, note, layer)
 

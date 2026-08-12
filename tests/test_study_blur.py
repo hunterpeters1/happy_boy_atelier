@@ -99,3 +99,43 @@ def test_alpha_channel_is_preserved(qapp):
     img = _solid_image(30, 30, QColor(120, 60, 200, 128))
     out = apply_study_effect(img, blur_pct=50, clarity_pct=50)
     assert out.pixelColor(15, 15).alpha() == 128
+
+
+# -- Value Check (grayscale_pct) --------------------------------------------
+
+def test_zero_grayscale_is_still_a_noop(qapp):
+    img = _solid_image(40, 40, QColor(200, 100, 50, 255))
+    out = apply_study_effect(img, blur_pct=0, clarity_pct=0, grayscale_pct=0)
+    assert out is img
+
+
+def test_full_grayscale_produces_equal_rgb_channels(qapp):
+    img = _solid_image(30, 30, QColor(220, 40, 40, 255))
+    out = apply_study_effect(img, blur_pct=0, clarity_pct=0, grayscale_pct=100)
+    c = out.pixelColor(15, 15)
+    assert c.red() == c.green() == c.blue()
+
+
+def test_partial_grayscale_is_between_original_and_full(qapp):
+    img = _solid_image(30, 30, QColor(220, 40, 40, 255))
+    original_spread = 220 - 40  # red channel minus green/blue
+    half = apply_study_effect(img, blur_pct=0, clarity_pct=0, grayscale_pct=50).pixelColor(15, 15)
+    half_spread = half.red() - half.green()
+    assert 0 < half_spread < original_spread
+
+
+def test_grayscale_composes_with_blur_and_clarity(qapp):
+    """The three effects share one pass (see apply_study_effect's
+    docstring) -- confirm turning all three on at once doesn't raise and
+    still desaturates.
+    """
+    img = _line_image(delta=20)
+    out = apply_study_effect(img, blur_pct=40, clarity_pct=40, grayscale_pct=100)
+    c = out.pixelColor(10, 10)
+    assert c.red() == c.green() == c.blue()
+
+
+def test_grayscale_alpha_channel_is_preserved(qapp):
+    img = _solid_image(30, 30, QColor(120, 60, 200, 128))
+    out = apply_study_effect(img, blur_pct=0, clarity_pct=0, grayscale_pct=100)
+    assert out.pixelColor(15, 15).alpha() == 128

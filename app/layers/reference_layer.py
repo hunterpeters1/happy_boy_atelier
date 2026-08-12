@@ -137,14 +137,16 @@ class ReferenceImageItem(InteractiveItem):
         self._display_pixmap_crop: QRect | None = None
         self._display_pixmap_source_rect = QRectF()
 
-        # Study Blur — see study_blur.py. 0 means "no effect" on both, the
-        # default for every image unless the artist turns it on, and the
-        # back-compat default for every .atelier file saved before this
-        # feature existed (from_dict()). Processed-pixmap cache is keyed
-        # on (blur, clarity, crop) so it only regenerates when one of
-        # those actually changes, not on every repaint.
+        # Study Blur / Value Check — see study_blur.py. 0 means "no
+        # effect" on any of the three, the default for every image unless
+        # the artist turns it on, and the back-compat default for every
+        # .atelier file saved before each feature existed (from_dict()).
+        # Processed-pixmap cache is keyed on (blur, clarity, grayscale,
+        # crop) so it only regenerates when one of those actually
+        # changes, not on every repaint.
         self._blur_amount = 0.0
         self._line_clarity = 0.0
+        self._grayscale_amount = 0.0
         self._processed_pixmap: QPixmap | None = None
         self._processed_cache_key: tuple | None = None
         # See set_defer_blur_refresh().
@@ -206,10 +208,11 @@ class ReferenceImageItem(InteractiveItem):
         return self._display_pixmap, self._display_pixmap_source_rect
 
     def _get_processed_display_pixmap(self) -> tuple[QPixmap, QRectF]:
-        """Whatever Study Blur result is currently cached — paint() calls
-        this unconditionally once blur/clarity is nonzero, but it does
-        NOT itself decide when to recompute for a changed blur_amount()/
-        line_clarity() (see _refresh_processed_pixmap() for why: that's
+        """Whatever Study Blur/Value Check result is currently cached —
+        paint() calls this unconditionally once blur/clarity/grayscale is
+        nonzero, but it does NOT itself decide when to recompute for a
+        changed blur_amount()/line_clarity()/grayscale_amount() (see
+        _refresh_processed_pixmap() for why: that's
         real numpy work, and Qt schedules a repaint on every single
         slider tick during a drag — recomputing here on every one of
         those would defeat the Properties panel's debouncing entirely,
@@ -221,7 +224,7 @@ class ReferenceImageItem(InteractiveItem):
         proxy, source_rect = self._get_display_pixmap()
         crop_now = QRect(self._crop)
         never_computed = self._processed_pixmap is None or self._processed_cache_key is None
-        crop_changed = not never_computed and self._processed_cache_key[2] != crop_now
+        crop_changed = not never_computed and self._processed_cache_key[3] != crop_now
         if never_computed or crop_changed:
             self._refresh_processed_pixmap()
         return self._processed_pixmap, source_rect
@@ -253,14 +256,18 @@ class ReferenceImageItem(InteractiveItem):
                 max(1, round(proxy.width() * scale)), max(1, round(proxy.height() * scale)),
                 Qt.KeepAspectRatio, Qt.SmoothTransformation,
             )
-        processed_image = apply_study_effect(work_pixmap.toImage(), self._blur_amount, self._line_clarity)
+        processed_image = apply_study_effect(
+            work_pixmap.toImage(), self._blur_amount, self._line_clarity, self._grayscale_amount
+        )
         processed_pixmap = QPixmap.fromImage(processed_image)
         if processed_pixmap.size() != proxy.size():
             processed_pixmap = processed_pixmap.scaled(
                 proxy.width(), proxy.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
         self._processed_pixmap = processed_pixmap
-        self._processed_cache_key = (self._blur_amount, self._line_clarity, QRect(self._crop))
+        self._processed_cache_key = (
+            self._blur_amount, self._line_clarity, self._grayscale_amount, QRect(self._crop)
+        )
 
     def boundingRect(self) -> QRectF:
         # Must cover the resize/rotate handles too, not just the image
@@ -395,6 +402,21 @@ class ReferenceImageItem(InteractiveItem):
 
     def set_line_clarity(self, value: float) -> None:
         self._line_clarity = max(0.0, min(100.0, value))
+        if not self._defer_blur_refresh:
+            self._refresh_processed_pixmap()
+        self.update()
+
+    def grayscale_amount(self) -> float:
+        return self._grayscale_amount
+
+    def set_grayscale_amount(self, value: float) -> None:
+        """"Value Check" — see study_blur.py's apply_study_effect(). Mirrors
+        set_blur_amount()/set_line_clarity() exactly, including reuse of
+        the same set_defer_blur_refresh() flag: one deferred-recompute
+        flag already covers "any of these three sliders is mid-drag,"
+        there's no need for a second one just for this slider.
+        """
+        self._grayscale_amount = max(0.0, min(100.0, value))
         if not self._defer_blur_refresh:
             self._refresh_processed_pixmap()
         self.update()
@@ -892,7 +914,8 @@ class ReferenceImageItem(InteractiveItem):
             # in via the Export dialog's checkbox (export_study_effect) —
             # never for thumbnails, which reuse rendering_for_export but
             # not this second flag (see MainWindow.export_project()).
-            if getattr(scene, "export_study_effect", False) and (self._blur_amount or self._line_clarity):
+            has_study_effect = self._blur_amount or self._line_clarity or self._grayscale_amount
+            if getattr(scene, "export_study_effect", False) and has_study_effect:
                 from ..canvas.study_blur import apply_study_effect
                 # Crop at full resolution first, then process — matching
                 # what _get_processed_display_pixmap() does at proxy
@@ -900,12 +923,14 @@ class ReferenceImageItem(InteractiveItem):
                 # cropped image's own size) feel the same in the export
                 # as they did in the on-screen preview.
                 cropped_source = self._source_pixmap.copy(self._crop)
-                processed = apply_study_effect(cropped_source.toImage(), self._blur_amount, self._line_clarity)
+                processed = apply_study_effect(
+                    cropped_source.toImage(), self._blur_amount, self._line_clarity, self._grayscale_amount
+                )
                 painter.drawPixmap(rect, QPixmap.fromImage(processed),
                                     QRectF(0, 0, processed.width(), processed.height()))
             else:
                 painter.drawPixmap(rect, self._source_pixmap, QRectF(self._crop))
-        elif self._blur_amount or self._line_clarity:
+        elif self._blur_amount or self._line_clarity or self._grayscale_amount:
             pixmap, source_rect = self._get_processed_display_pixmap()
             painter.drawPixmap(rect, pixmap, source_rect)
         else:
@@ -949,10 +974,11 @@ class ReferenceImageItem(InteractiveItem):
             "base_w": self._base_w, "base_h": self._base_h,
             "crop": [self._crop.x(), self._crop.y(), self._crop.width(), self._crop.height()],
             "image": f"images/{self.image_id}.png",
-            # Study Blur (see canvas/study_blur.py) — 0/0 for every image
-            # until the artist turns it on.
+            # Study Blur / Value Check (see canvas/study_blur.py) — 0 for
+            # every image until the artist turns one of them on.
             "blur": self._blur_amount,
             "line_clarity": self._line_clarity,
+            "grayscale": self._grayscale_amount,
             # None for images imported before this field existed.
             "original_format": self.original_format,
             "original_file_size": self.original_file_size,
@@ -984,11 +1010,12 @@ class ReferenceImageItem(InteractiveItem):
         item.setOpacity(float(d.get("opacity", 1.0)))
         item.setVisible(bool(d.get("visible", True)))
         item.set_locked(bool(d.get("locked", False)))
-        # Absent on every .atelier file saved before Study Blur existed —
-        # defaults to "no effect," so old projects reopen looking exactly
-        # as they did.
+        # Absent on every .atelier file saved before Study Blur/Value
+        # Check existed — defaults to "no effect," so old projects reopen
+        # looking exactly as they did.
         item.set_blur_amount(float(d.get("blur", 0.0)))
         item.set_line_clarity(float(d.get("line_clarity", 0.0)))
+        item.set_grayscale_amount(float(d.get("grayscale", 0.0)))
         return item
 
     def encode_png(self) -> bytes:

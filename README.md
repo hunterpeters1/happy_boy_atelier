@@ -136,6 +136,13 @@ Each imported photo is its own object:
   in exports by default**; the Export dialog has an explicit "Include
   Study Blur effect" checkbox if you want it baked into a specific
   export.
+- **Value Check** — a **Value Check** slider (0–100) alongside Blur/Line
+  Clarity non-destructively desaturates the image, for judging light/dark
+  value relationships without color as a distraction. Same display-only,
+  export-opt-in behavior as Study Blur, and composes with it (squint-test
+  and check values on the same photo at once). **Edit > Toggle Value
+  Check (All References)** flips every visible, unlocked reference image
+  at once — "step back and squint at the whole board" — as one undo step.
 - **Eyedropper** — tool button in the Project Panel's Reference section
   (not the toolbar). Arm it, then hover any reference image: a
   **Swatches** dock (tabbed with Properties) shows a live readout of the
@@ -157,6 +164,12 @@ section** (not the toolbar):
   second sets the end, with a dashed preview line following your cursor
   in between. Draws an arrowed path showing how the eye should move
   through the composition.
+- **Measurement** — a ruler and protractor in one: click-drag-click like
+  a movement line, but the placed segment shows a live readout of its
+  length (in the canvas's own unit) and its angle from horizontal, e.g.
+  `12.4 in · 37°`. Once placed, drag either end independently to adjust
+  it — hold **Shift** while dragging an endpoint to snap its angle to 15°
+  increments. Persists and undoes like any other composition marker.
 - **Note** — click to place a pin marker with an editable text label;
   double-click it on canvas, or use the Properties panel's text box, to
   edit.

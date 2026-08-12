@@ -65,6 +65,17 @@ _SHAPES: dict[str, str] = {
     # Eyedropper: a diamond-bodied pipette (bulb top-right, tip bottom-left)
     # with a band line near the tip and a small sampled-drop dot below it.
     "eyedropper": '<path d="M14.5 2.5l3 3-9 9-4 1 1-4z"/><path d="M12 5l3 3"/><circle cx="4" cy="16" r="1"/>',
+    # Measurement tool: a ruler bar with tick marks, tilted to read as
+    # "placed diagonally across the composition" rather than a static
+    # horizontal bar.
+    "ruler": (
+        '<g transform="rotate(-30 10 10)"><rect x="2" y="8" width="16" height="5" rx="0.5"/>'
+        '<path d="M5.5 8v2.2M9 8v2.2M12.5 8v2.2M16 8v2.2"/></g>'
+    ),
+    # Value Check: a circle split by its own diameter -- reads as
+    # "light/dark split" via outline only, no fill, matching every other
+    # glyph's single-stroke-weight rule (no half-filled shape here).
+    "contrast": '<circle cx="10" cy="10" r="7"/><path d="M10 3v14"/>',
 }
 
 

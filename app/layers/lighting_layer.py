@@ -9,17 +9,15 @@ import uuid
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsItemGroup, QGraphicsRectItem
+from PySide6.QtWidgets import QGraphicsItemGroup
 
 from .. import constants as C
 from ..canvas.interactive_item import InteractiveItem
+from ..canvas.point_handle import TwoPointHandle
 from .composition_layer import NoteItem
 from .stacking_mixin import StackedLayerMixin
 
 SOURCE_R = 10
-# Was 8 — bumped for a more forgiving grab, same reasoning as
-# reference_layer.py's HANDLE_HIT_RADIUS_PX widening.
-POINT_HANDLE_PX = 12
 
 
 class LightSourceItem(InteractiveItem):
@@ -58,44 +56,6 @@ class LightSourceItem(InteractiveItem):
         return item
 
 
-class _PointHandle(QGraphicsRectItem):
-    def __init__(self, arrow: "DirectionArrowItem", which: str):
-        super().__init__(-POINT_HANDLE_PX / 2, -POINT_HANDLE_PX / 2, POINT_HANDLE_PX, POINT_HANDLE_PX, arrow)
-        self._arrow = arrow
-        self._which = which
-        self._press_points = None
-        self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
-        self.setBrush(QBrush(QColor(arrow.color())))
-        self.setPen(QPen(QColor(C.COLOR_BG_DARKEST), 1))
-        self.setZValue(1000)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setAcceptedMouseButtons(Qt.LeftButton)
-
-    def mousePressEvent(self, event):
-        self._press_points = self._arrow.points()
-        event.accept()
-
-    def mouseMoveEvent(self, event):
-        local = self._arrow.mapFromScene(event.scenePos())
-        self._arrow.set_point(self._which, local)
-        event.accept()
-
-    def mouseReleaseEvent(self, event):
-        event.accept()
-        if self._press_points is None:
-            return
-        old = self._press_points
-        self._press_points = None
-        new = self._arrow.points()
-        if old == new:
-            return
-        scene = self._arrow.scene()
-        if scene is None or not hasattr(scene, "undo_stack"):
-            return
-        from ..canvas.undo_commands import SetPropertyCommand
-        scene.undo_stack.push(SetPropertyCommand(self._arrow.set_points, old, new, "Move direction arrow"))
-
-
 class DirectionArrowItem(InteractiveItem):
     def __init__(self, kind: str, p1: QPointF, p2: QPointF, arrow_id: str | None = None):
         super().__init__()
@@ -108,8 +68,8 @@ class DirectionArrowItem(InteractiveItem):
         # every sibling marker gives a PointingHandCursor cue that it's
         # grabbable; this one didn't.
         self.set_normal_cursor(Qt.PointingHandCursor)
-        self._h1 = _PointHandle(self, "p1")
-        self._h2 = _PointHandle(self, "p2")
+        self._h1 = TwoPointHandle(self, "p1", undo_text="Move direction arrow")
+        self._h2 = TwoPointHandle(self, "p2", undo_text="Move direction arrow")
         self._reposition_handles()
 
     def color(self) -> str:
