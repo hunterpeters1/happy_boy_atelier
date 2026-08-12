@@ -493,6 +493,59 @@ each time the action runs, not shadowed.
   pre-filled from the project name and (if saved before) its folder,
   recomputes live as the format radio changes, and is sanitized against
   filesystem-illegal characters.
+- **Presets** — a named `{format, dpi, include_study_effect}` combo,
+  recalled via a combo box beside the format radios. Deliberately never
+  stores the destination, which is per-export by nature (a preset reused
+  on a different painting shouldn't silently point at the last painting's
+  folder). Serialized as a JSON string under one `QSettings` key
+  (`_PRESETS_SETTINGS_KEY = "exportPresets"`) rather than relying on
+  `QSettings`' own dict/bool marshalling, which isn't guaranteed to
+  round-trip identically across every backend (registry/plist/INI).
+
+## Reference library (`app/library.py`, `app/panels/library_panel.py`)
+
+A personal, cross-project asset collection — explicitly **not** part of
+any project's scene or `.atelier` file, so it can't become shadow project
+state (same boundary Recent Files already sits on). `library.py` stores a
+flat folder of copied-in images plus per-item thumbnails under
+`QStandardPaths.AppDataLocation`, the same location pattern
+`app/recovery.py` already uses. `LibraryPanel` is a `QDockWidget`,
+constructed once in `MainWindow.__init__` (unlike the Project/Properties/
+Swatches docks, which are rebuilt fresh on every `_new_project()` via
+`_rebuild_workspace()`) and tabified with the Project Panel dock each time
+a new one is built. Dragging a thumbnail out carries a real
+`QUrl.fromLocalFile()` (`_LibraryList.mimeData()`), which `CanvasView`'s
+existing OS drag-and-drop handler already accepts unmodified — placing a
+library image is an ordinary `AddItemCommand`-backed import, not a new
+undo path. Double-clicking a thumbnail does the same import via
+`LibraryPanel.import_requested`, connected straight to
+`MainWindow._import_image_paths()`.
+
+## Project templates (`app/project_templates.py`)
+
+A named `{width, height, unit, guides}` starting point for New Painting —
+explicitly *not* reference images or composition/lighting content, since
+auto-populating those would cross into "software infers the composition,"
+out of scope by design. Saved via `MainWindow.save_as_template()` (File
+menu) from the current project's `CanvasSpec` and
+`GuidesLayerGroup.to_dict()`; applied via `NewProjectDialog`'s My
+Templates list, which calls `_apply_template()` to fill width/height/unit
+and stage the guides dict, returned by `selected_template_guides()` and
+passed through to `MainWindow._new_project(spec, guides)`, which applies
+it via `GuidesLayerGroup.load_from_dict()` after scene construction.
+Picking a plain size preset afterward clears the staged guides back to
+`None` — a template's guides shouldn't silently leak onto an unrelated
+format choice. Same JSON-string-in-`QSettings` storage as export presets.
+
+## About dialog (`app/dialogs/about_dialog.py`)
+
+A `QDialog` styled entirely via `theme.py`'s existing global `QDialog`
+rule (no bespoke stylesheet), replacing the previous plain
+`QMessageBox.about()` call from `MainWindow._show_about()` (Help menu).
+Shows the app icon (`resources.app_icon_path()`), name/version from
+`constants.py`, the mission line, and credits — a pre-`MainWindow` launch
+splash screen was explicitly scoped out as real added complexity for a
+fast-starting desktop app.
 
 ## Current scope
 
@@ -502,9 +555,11 @@ composition guides → perspective grids → lighting notes → save/reopen
 now also covers: undo/redo, crash recovery, a real outliner-based
 Project Panel, a unified selection model, an Inspector with editable
 vanishing-point/horizon coordinates and multi-select batch editing, a
-single-panel export flow, a command palette, OS drag-and-drop import,
-live two-click-tool previews, rotation/position snapping, right-click
-context menus, and recent files with thumbnails. See `CHANGELOG.md` for
-the itemized history. Still explicitly excluded per spec: AI generation,
-brush/paint tools, cloud accounts, social/marketplace features. See
-`V2_ROADMAP.md` for what's actually still ahead.
+single-panel export flow with batch presets, a command palette, OS
+drag-and-drop import, a cross-project reference library, project
+templates, live two-click-tool previews, rotation/position/edge
+snapping, right-click context menus, recent files with thumbnails, and a
+proper About dialog. See `CHANGELOG.md` for the itemized history. Still
+explicitly excluded per spec: AI generation, brush/paint tools, cloud
+accounts, social/marketplace features. See `V2_ROADMAP.md` for what's
+actually still ahead.

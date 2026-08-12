@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QColorDialog,
     QDockWidget,
     QFileDialog,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 from . import constants as C
 from . import debug_tools
 from . import icons
+from . import project_templates
 from . import recovery
 from . import themes
 from .hacker_status import HackerStatusWidget
@@ -38,12 +40,14 @@ from .atelier_io import (
 from .canvas.canvas_scene import CanvasScene
 from .canvas.canvas_view import CanvasView
 from .canvas.undo_commands import AddItemCommand
+from .dialogs.about_dialog import AboutDialog
 from .dialogs.command_palette import CommandPalette
 from .dialogs.export_dialog import ExportDialog
 from .dialogs.new_project_dialog import NewProjectDialog
 from .dialogs.start_screen import StartScreen
 from .panels.dock_title_bar import DockTitleBar
 from .panels.layers_panel import LayersPanel
+from .panels.library_panel import LibraryPanel
 from .panels.properties_panel import PropertiesPanel
 from .panels.swatches_panel import SwatchesPanel
 from .project import CanvasSpec, ProjectMeta
@@ -73,6 +77,21 @@ class MainWindow(QMainWindow):
         self._focus_mode = False
         self._pre_focus_dock_visible: dict[int, bool] = {}
         self._pre_focus_toolbar_visible = True
+
+        # The Library dock is cross-project (app/library.py) and, unlike
+        # layers/properties/swatches, is built once here rather than
+        # rebuilt per-project in _rebuild_workspace() -- its own content
+        # doesn't depend on which painting is open. _rebuild_workspace()
+        # still re-tabifies it against the freshly (re)built Project Panel
+        # dock each time, since layers_dock itself is a new object every
+        # call and Qt's tab grouping doesn't survive that on its own.
+        self.library_panel = LibraryPanel(self)
+        self.library_panel.import_requested.connect(self._import_image_paths)
+        self.library_dock = QDockWidget("Library", self)
+        self.library_dock.setWidget(self.library_panel)
+        self.library_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.library_dock.setTitleBarWidget(DockTitleBar("Library"))
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.library_dock)
 
         # Appearance (see themes.py) — caller (main.py) already applied
         # this mode's palette to constants.py and ran apply_theme() before
@@ -223,12 +242,23 @@ class MainWindow(QMainWindow):
         )
         scene.undo_stack.indexChanged.connect(self._on_undo_index_changed)
 
-        if self.layers_dock is not None:
-            self.removeDockWidget(self.layers_dock)
-        if self.properties_dock is not None:
-            self.removeDockWidget(self.properties_dock)
-        if self.swatches_dock is not None:
-            self.removeDockWidget(self.swatches_dock)
+        # removeDockWidget() only detaches a dock from the layout -- the
+        # QDockWidget itself (still Qt-parented to `self`) lingered on as
+        # an orphan otherwise, for every project switch of the session's
+        # lifetime. Harmless-looking before library_dock existed (nothing
+        # else ever queried a dock's tab-group membership), but tracked
+        # down here while verifying library_dock stays correctly tabified
+        # with the Project dock across repeated New/Open actions — worth
+        # actually detaching rather than leaving to `self`'s child list to
+        # accumulate. setParent(None) first (synchronous, unlike
+        # deleteLater() alone) so nothing about the old dock's still-being-
+        # a-child-of-`self` state can affect the fresh tabifyDockWidget()
+        # call just below.
+        for old_dock in (self.layers_dock, self.properties_dock, self.swatches_dock):
+            if old_dock is not None:
+                self.removeDockWidget(old_dock)
+                old_dock.setParent(None)
+                old_dock.deleteLater()
 
         self.layers_panel = LayersPanel(scene, self)
         self.layers_panel.request_import.connect(self.import_images)
@@ -242,6 +272,11 @@ class MainWindow(QMainWindow):
         self.layers_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
         self.layers_dock.setTitleBarWidget(DockTitleBar("Project"))
         self.addDockWidget(Qt.LeftDockWidgetArea, self.layers_dock)
+        # library_dock is built once in __init__ (cross-project, unlike
+        # this dock) and survives every _rebuild_workspace() call, but
+        # Qt's tab grouping doesn't survive layers_dock itself being a
+        # fresh object each time -- re-tabify explicitly.
+        self.tabifyDockWidget(self.layers_dock, self.library_dock)
 
         self.properties_panel = PropertiesPanel(scene, self)
         self.properties_panel.request_delete.connect(self._delete_selected)
@@ -330,6 +365,7 @@ class MainWindow(QMainWindow):
         self.recent_menu.aboutToShow.connect(self._populate_recent_menu)
         self.save_action = self._add_action(file_menu, "Save", "Ctrl+S", self.save_project, icon_name="save")
         self._add_action(file_menu, "Save As…", "Ctrl+Shift+S", lambda: self.save_project(force_dialog=True))
+        self._add_action(file_menu, "Save as Template…", None, self.save_as_template)
         file_menu.addSeparator()
         self.import_action = self._add_action(
             file_menu, "Import Reference Image(s)…", "Ctrl+I", self.import_images, icon_name="import"
@@ -460,11 +496,11 @@ class MainWindow(QMainWindow):
         PureRef's canvas-first identity, without adopting its chrome-less
         floating-window model, which doesn't fit this app's docked,
         project-based shape. Dock visibility is snapshotted and restored
-        exactly, not blanket-reshown, since Properties/Swatches are
-        tabified — only one of them may have actually been visible/active
-        going in.
+        exactly, not blanket-reshown, since Properties/Swatches and
+        Project/Library are each tabified pairs — only one of a pair may
+        have actually been visible/active going in.
         """
-        docks = [self.layers_dock, self.properties_dock, self.swatches_dock]
+        docks = [self.layers_dock, self.properties_dock, self.swatches_dock, self.library_dock]
         if entering:
             self._pre_focus_dock_visible = {id(d): d.isVisible() for d in docks if d is not None}
             self._pre_focus_toolbar_visible = self.toolbar.isVisible()
@@ -629,12 +665,7 @@ class MainWindow(QMainWindow):
         return action
 
     def _show_about(self) -> None:
-        QMessageBox.about(
-            self, "About Happy Boy Atelier",
-            f"{C.APP_NAME}  ·  v{C.APP_VERSION}\n\n"
-            "A digital drafting table for traditional painters.\n"
-            "Plan composition, perspective, and lighting before you touch the physical canvas.",
-        )
+        AboutDialog(self).exec()
 
     def _collect_actions(self) -> list[QAction]:
         """Walk the menu bar's own QActions rather than maintaining a
@@ -694,16 +725,36 @@ class MainWindow(QMainWindow):
         clear_action.triggered.connect(self._clear_recent_files)
 
     # -- project lifecycle --------------------------------------------------
-    def _new_project(self, spec: CanvasSpec) -> None:
+    def _new_project(self, spec: CanvasSpec, guides: dict | None = None) -> None:
         self.current_path = None
         self.meta = ProjectMeta()
         scene = CanvasScene(spec, bg_color=self.meta.bg_color)
+        if guides:
+            scene.guides_layer.load_from_dict(guides)
         self._rebuild_workspace(scene)
 
     def new_project_dialog(self) -> None:
         dialog = NewProjectDialog(self)
         if dialog.exec():
-            self._new_project(dialog.canvas_spec())
+            self._new_project(dialog.canvas_spec(), dialog.selected_template_guides())
+
+    def save_as_template(self) -> None:
+        """Save the current painting's canvas format + guide toggles
+        only — never reference images or composition/lighting content,
+        see project_templates.py's module docstring — as a named preset
+        selectable next time at New Painting.
+        """
+        if self.scene is None:
+            return
+        name, ok = QInputDialog.getText(self, "Save as Template", "Template name:")
+        name = name.strip()
+        if not ok or not name:
+            return
+        spec = self.scene.canvas_spec
+        project_templates.save_template(
+            name, width=spec.width, height=spec.height, unit=spec.unit,
+            guides=self.scene.guides_layer.to_dict(),
+        )
 
     def import_images(self) -> None:
         if self.scene is None:

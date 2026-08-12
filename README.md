@@ -89,13 +89,29 @@ looking for "is there a way to…", check here before assuming there isn't.
   to a blank canvas.
 - **File > New Painting…** (Ctrl+N) — width/height/unit are always
   visible and editable; portrait/landscape/square presets just fill them
-  in, no separate "custom" mode to switch into.
+  in, no separate "custom" mode to switch into. A **My Templates** list
+  also appears here once you've saved at least one — see Project
+  templates below.
+- **Project templates** — **File > Save as Template…** saves the current
+  painting's canvas format and guide toggles (Rule of Thirds/Golden
+  Ratio/Inch Grid) under a name you pick, for reuse next time you start a
+  new painting. Deliberately never includes reference images or
+  composition/lighting content — a template only ever pre-fills the blank
+  canvas format and which guides start on, never artwork.
 - **Import** — File > Import Reference Image(s)… (Ctrl+I), or drag image
   files from your OS straight onto the canvas (multiple at once is fine —
   it's one undo step either way). Supported: PNG, JPG/JPEG, BMP, WEBP.
   **HEIC/HEIF is not supported here** — Qt has no HEIC decoder, so those
   files are silently ignored by drag-and-drop. Convert HEIC to JPEG first
   (the `uploader/` tool below does this automatically for phone photos).
+- **Reference Library** (dock, tabbed with the Project Panel) — a
+  personal, cross-project collection of images, separate from any single
+  painting's `.atelier` file or undo stack. Add images via its "Add
+  Images to Library…" button; drag a thumbnail out onto the canvas (or
+  double-click it) to import it into the current painting, same undoable
+  import as File > Import Reference Image(s)…. A search box filters by
+  name; right-click an entry to remove it from the library (the original
+  file on disk is never touched — the library keeps its own copy).
 
 ### Reference images
 
@@ -314,6 +330,11 @@ Two independent lock mechanisms:
 **File > Export…** (Ctrl+E), one panel, destination pre-filled from the
 project name and updated live as you change format:
 
+- **Presets** — save the current Format/DPI/Study Blur combo under a name
+  ("Save Preset…") for exporting a batch of paintings the same way over
+  and over; the Preset dropdown recalls one instantly. Presets never
+  store the destination path — that's always re-derived from whichever
+  project you're exporting, on purpose.
 - **PNG or JPG** at a chosen **Output DPI** (72–1200, default 300).
 - **PDF Planning Sheet** — a single-page, letter-size, 300dpi PDF with
   the canvas rendered at the top and a bulleted list of every
@@ -330,6 +351,10 @@ Mode**. Hack Mode is a developer/debug theme — switching to it also adds
 a **Debug menu** (verbose console logging, a live scene-stats readout in
 the status bar, reload stylesheet) and a decorative status-bar widget.
 Harmless to poke at, but not part of the normal painting workflow.
+
+**Help > About Happy Boy Atelier** shows a small identity dialog — app
+name/version and the mission line ("plan the painting before you touch
+the canvas").
 
 ## Upload from Phone
 

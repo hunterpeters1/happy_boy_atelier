@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import constants as C
+from .. import project_templates
 from ..project import CanvasSpec
 
 _CATEGORIES = {
@@ -78,6 +79,26 @@ class NewProjectDialog(QDialog):
         self.preset_list.itemClicked.connect(self._apply_preset)
         layout.addWidget(self.preset_list)
 
+        # -- templates: a named {width, height, unit, guides} starting
+        # point saved from an existing project (MainWindow.
+        # save_as_template()) -- deliberately never reference images or
+        # composition/lighting content, just workspace setup. Section
+        # only shown at all once at least one template exists.
+        self._selected_template_guides: dict | None = None
+        self._templates = project_templates.load_templates()
+        self.template_section_label = QLabel("My Templates")
+        self.template_section_label.setProperty("role", "section")
+        layout.addWidget(self.template_section_label)
+        self.template_list = QListWidget()
+        self.template_list.setMaximumHeight(90)
+        self.template_list.itemClicked.connect(self._apply_template)
+        for name in sorted(self._templates):
+            self.template_list.addItem(QListWidgetItem(name))
+        layout.addWidget(self.template_list)
+        has_templates = bool(self._templates)
+        self.template_section_label.setVisible(has_templates)
+        self.template_list.setVisible(has_templates)
+
         size_form = QFormLayout()
         self.width_spin = QDoubleSpinBox()
         self.width_spin.setRange(0.5, 500)
@@ -116,6 +137,28 @@ class NewProjectDialog(QDialog):
         self.width_spin.setValue(w)
         self.height_spin.setValue(h)
         self.unit_combo.setCurrentText("in")
+        # A plain size preset is a different starting point than any
+        # previously-clicked template -- don't silently carry the old
+        # template's guide toggles onto an unrelated format choice.
+        self._selected_template_guides = None
+
+    def _apply_template(self, entry: QListWidgetItem) -> None:
+        template = self._templates.get(entry.text())
+        if template is None:
+            return
+        self.width_spin.setValue(float(template.get("width", CanvasSpec().width)))
+        self.height_spin.setValue(float(template.get("height", CanvasSpec().height)))
+        self.unit_combo.setCurrentText(template.get("unit", CanvasSpec().unit))
+        self._selected_template_guides = template.get("guides")
+
+    def selected_template_guides(self) -> dict | None:
+        """The `guides` dict of whichever template was last clicked, or
+        None if the dialog is closed with a plain size preset (or no
+        preset at all) instead — MainWindow._new_project() applies this
+        to the freshly-created scene's GuidesLayerGroup.load_from_dict()
+        after construction.
+        """
+        return self._selected_template_guides
 
     def canvas_spec(self) -> CanvasSpec:
         name = self.name_edit.text().strip() or "Untitled Painting"

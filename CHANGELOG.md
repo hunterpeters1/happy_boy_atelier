@@ -64,6 +64,32 @@ design rationale. Landed in phases.
   image's edge, not just center-to-center (`ReferenceImageItem.
   _half_extent()`, extending `_snap_position()`).
 
+### Phase 4 (pulled-forward studio features, per `V2_ROADMAP.md`'s own deferred-pending-real-use list)
+- **Reference library** — a new dock (`app/panels/library_panel.py`,
+  tabified with the Project Panel) holding a personal, cross-project
+  collection of reference images (`app/library.py`), stored outside any
+  `.atelier` file or undo stack — explicitly not project/scene state, the
+  same boundary Recent Files already sits on. Import via a file picker or
+  drag-and-drop; drag a thumbnail onto the canvas to place it, routed
+  through the exact same drop path OS file drag-and-drop already used, so
+  it's an ordinary undoable `AddItemCommand` with no new placement logic.
+- **Batch export presets** — the Export panel (`app/dialogs/
+  export_dialog.py`) gains a Preset combo to save/recall a named
+  `{format, DPI, include Study Blur}` combo, for exporting a batch of
+  paintings the same way repeatedly. Never stores the destination path,
+  which stays per-export by design.
+- **Project templates** — "New Painting" gains a My Templates list
+  seeded from `MainWindow.save_as_template()` (File menu), each entry a
+  named `{width, height, unit, guide toggles}` starting point saved from
+  an existing project's current canvas format — deliberately never
+  reference images or composition/lighting content, since auto-populating
+  those would cross into "software infers the composition." Picking a
+  plain size preset afterward clears any staged template guides back out.
+- **About dialog** (`app/dialogs/about_dialog.py`, Help menu) — a proper
+  styled identity screen (app icon, name/version, the "plan the painting
+  before you touch the canvas" mission line, credits) replacing the old
+  plain `QMessageBox.about()` call.
+
 ## Unreleased — UX redesign ("Studio, Not Software")
 
 A ground-up interaction and visual-design pass, driven by a full-source
