@@ -5,7 +5,7 @@ full layer stack.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QLineF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QLineF, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPen, QTransform, QUndoStack
 from PySide6.QtWidgets import QGraphicsScene
 
@@ -191,6 +191,26 @@ class CanvasScene(QGraphicsScene):
         painter.setBrush(QBrush(QColor(C.COLOR_CANVAS)))
         painter.setPen(QPen(QColor(C.COLOR_CANVAS_EDGE), 2))
         painter.drawRect(self._canvas_rect)
+        self._draw_corner_rivets(painter)
+
+    def _draw_corner_rivets(self, painter) -> None:
+        """Four small filled marks just inside each canvas corner —
+        "rivets holding the panel plate together," reinforcing the
+        machined-instrument identity theme.py's docstring describes.
+        Structural hardware, not an interactive accent, so deliberately
+        COLOR_LINE rather than brass.
+        """
+        inset = 10.0
+        r = self._canvas_rect
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(C.COLOR_LINE)))
+        for corner in (
+            QPointF(r.left() + inset, r.top() + inset),
+            QPointF(r.right() - inset, r.top() + inset),
+            QPointF(r.left() + inset, r.bottom() - inset),
+            QPointF(r.right() - inset, r.bottom() - inset),
+        ):
+            painter.drawEllipse(corner, C.RIVET_RADIUS_PX, C.RIVET_RADIUS_PX)
 
     def set_bg_color(self, color: str) -> None:
         """Update the desk color behind the canvas rect. Updates the

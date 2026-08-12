@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased — UI upgrade ("A Unique Instrument, Not a PureRef Clone")
+
+A second design pass, informed by studying PureRef/Milanote/etc. for what
+makes each of *their* UIs distinctive, then deliberately not copying
+either — deepening the existing brass/graphite instrument-panel identity
+and finishing several pieces the prior UX redesign explicitly cut for
+scope. See `V2_ROADMAP.md`'s Section 7 and `ARCHITECTURE.md` for the full
+design rationale. Landed in phases; this is Phase 1 (lowest-risk,
+highest-identity-payoff — nothing here touches undo/serialization).
+
+### Phase 1
+- **Rule of Thirds / Golden Ratio intersection snapping** — dragging a
+  reference image now also snaps to a guide intersection while that guide
+  is turned on, alongside the existing canvas-center/other-image-center
+  snapping (`ReferenceImageItem._snap_position()`).
+- **Hover-reveal Project Panel row icons** — item rows' eye/lock icons
+  now rest dim and rise to full opacity on hover, via the same fade
+  `app/scrollbars.py` already uses for scrollbar handles
+  (`app/panels/row_hover.py`). A row whose lock/visibility was actually
+  toggled away from its default stays legible even at rest.
+- **Focus Mode** ("Clear the Bench," View menu, Ctrl+Shift+F) — hides the
+  toolbar and every dock so only the canvas remains; restores each
+  panel's exact prior visibility on exit.
+- **Two hardware motifs**: hairline corner rivets on the canvas rect and
+  every dock's title bar (`app/panels/dock_title_bar.py`), and
+  print-production-style trim marks plus a live physical-dimension
+  readout on the canvas corners (`CanvasView.drawForeground()`).
+
 ## Unreleased — UX redesign ("Studio, Not Software")
 
 A ground-up interaction and visual-design pass, driven by a full-source

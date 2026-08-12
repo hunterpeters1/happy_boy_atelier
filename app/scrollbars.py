@@ -34,27 +34,33 @@ from PySide6.QtWidgets import (
 
 # Long enough that sweeping the pointer across a panel edge doesn't cause
 # a visible flicker, short enough that the scrollbar doesn't linger once
-# you've clearly moved on.
-_HIDE_DELAY_MS = 500
+# you've clearly moved on. Not scrollbar-specific despite the name — also
+# reused by app/panels/row_hover.py for the Project Panel's hover-reveal
+# row icons, so the two fades read as one consistent app-wide timing
+# rather than two independently-tuned ones.
+HIDE_DELAY_MS = 500
 # Quick enough to feel responsive rather than laggy, slow enough to read
 # as a fade rather than a blink.
-_FADE_MS = 150
+FADE_MS = 150
 
 
-class _BarFade:
-    """One of these per scrollbar (lazily created, kept alive by being
-    parented to the bar) — bundles the QGraphicsOpacityEffect actually
-    doing the hiding with the QPropertyAnimation that fades its opacity,
-    so repeated reveal/hide calls animate from wherever the fade
-    currently is instead of jumping.
+class OpacityFade:
+    """One of these per faded widget (lazily created, kept alive by being
+    parented to it) — bundles the QGraphicsOpacityEffect actually doing
+    the hiding with the QPropertyAnimation that fades its opacity, so
+    repeated reveal/hide calls animate from wherever the fade currently is
+    instead of jumping. Despite living in this module (scrollbars were its
+    first use), nothing here is scrollbar-specific — any QWidget works —
+    which is why app/panels/row_hover.py reuses it directly rather than
+    duplicating the animation bookkeeping.
     """
 
-    def __init__(self, bar: QScrollBar) -> None:
-        self.effect = QGraphicsOpacityEffect(bar)
+    def __init__(self, widget: QWidget) -> None:
+        self.effect = QGraphicsOpacityEffect(widget)
         self.effect.setOpacity(0.0)
-        bar.setGraphicsEffect(self.effect)
-        self.animation = QPropertyAnimation(self.effect, b"opacity", bar)
-        self.animation.setDuration(_FADE_MS)
+        widget.setGraphicsEffect(self.effect)
+        self.animation = QPropertyAnimation(self.effect, b"opacity", widget)
+        self.animation.setDuration(FADE_MS)
         self.animation.setEasingCurve(QEasingCurve.OutCubic)
 
     def fade_to(self, target: float) -> None:
@@ -72,7 +78,7 @@ class _BarFade:
 class _ScrollBarRevealFilter(QObject):
     def __init__(self, app: QApplication) -> None:
         super().__init__(app)
-        self._fades: dict[int, _BarFade] = {}
+        self._fades: dict[int, OpacityFade] = {}
         self._hide_timers: dict[int, QTimer] = {}
         self._pressed: set[int] = set()
         app.installEventFilter(self)
@@ -92,10 +98,10 @@ class _ScrollBarRevealFilter(QObject):
             return parent
         return None
 
-    def _fade_for(self, bar: QScrollBar) -> _BarFade:
+    def _fade_for(self, bar: QScrollBar) -> OpacityFade:
         fade = self._fades.get(id(bar))
         if fade is None:
-            fade = _BarFade(bar)
+            fade = OpacityFade(bar)
             self._fades[id(bar)] = fade
         return fade
 
@@ -136,7 +142,7 @@ class _ScrollBarRevealFilter(QObject):
                 pass  # underlying C++ scrollbar already deleted
 
         timer.timeout.connect(_fire)
-        timer.start(_HIDE_DELAY_MS)
+        timer.start(HIDE_DELAY_MS)
         self._hide_timers[id(bar)] = timer
 
     # -- Qt event filter ---------------------------------------------------

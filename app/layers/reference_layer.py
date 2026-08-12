@@ -20,6 +20,7 @@ from .. import constants as C
 from ..canvas.handle_frame import HandleFrame, HANDLE_PX, MIN_SCALE, MAX_SCALE
 from ..canvas.interactive_item import InteractiveItem
 from ..canvas.resize_math import compute_corner_resize
+from .guide_overlay import GOLDEN_SECTION
 from .stacking_mixin import StackedLayerMixin
 
 ROTATION_SNAP_DEG = 15.0
@@ -821,9 +822,12 @@ class ReferenceImageItem(InteractiveItem):
         return super().itemChange(change, value)
 
     def _snap_position(self, proposed: QPointF) -> QPointF:
-        """Snap the item's center to the canvas center or to another
-        visible reference image's center, within a zoom-independent
-        catch radius. Hold Alt/Option to bypass entirely.
+        """Snap the item's center to the canvas center, to another visible
+        reference image's center, or to a rule-of-thirds/golden-ratio
+        guide intersection (only for whichever of those guides the artist
+        has actually turned on — snapping never activates for a hidden
+        guide), within a zoom-independent catch radius. Hold Alt/Option to
+        bypass entirely.
         """
         if QApplication.keyboardModifiers() & Qt.AltModifier:
             return proposed
@@ -848,6 +852,16 @@ class ReferenceImageItem(InteractiveItem):
                     continue
                 xs.append(other.pos().x())
                 ys.append(other.pos().y())
+        guides_layer = getattr(scene, "guides_layer", None)
+        if guides_layer is not None:
+            if guides_layer.thirds.isVisible():
+                r = guides_layer.thirds.boundingRect()
+                xs.extend(r.left() + r.width() * i / 3 for i in (1, 2))
+                ys.extend(r.top() + r.height() * i / 3 for i in (1, 2))
+            if guides_layer.golden.isVisible():
+                r = guides_layer.golden.boundingRect()
+                xs.extend(r.left() + r.width() * f for f in (GOLDEN_SECTION, 1 - GOLDEN_SECTION))
+                ys.extend(r.top() + r.height() * f for f in (GOLDEN_SECTION, 1 - GOLDEN_SECTION))
 
         x, y = proposed.x(), proposed.y()
         for cx in xs:

@@ -42,6 +42,7 @@ from .dialogs.command_palette import CommandPalette
 from .dialogs.export_dialog import ExportDialog
 from .dialogs.new_project_dialog import NewProjectDialog
 from .dialogs.start_screen import StartScreen
+from .panels.dock_title_bar import DockTitleBar
 from .panels.layers_panel import LayersPanel
 from .panels.properties_panel import PropertiesPanel
 from .panels.swatches_panel import SwatchesPanel
@@ -64,6 +65,14 @@ class MainWindow(QMainWindow):
         self.layers_dock: QDockWidget | None = None
         self.properties_dock: QDockWidget | None = None
         self.swatches_dock: QDockWidget | None = None
+
+        # Focus Mode ("Clear the Bench") — see toggle_focus_mode(). Restored
+        # to exactly its pre-focus state on exit, not blanket-reshown, since
+        # Properties/Swatches are tabified and only one may have been the
+        # active/visible one going in.
+        self._focus_mode = False
+        self._pre_focus_dock_visible: dict[int, bool] = {}
+        self._pre_focus_toolbar_visible = True
 
         # Appearance (see themes.py) — caller (main.py) already applied
         # this mode's palette to constants.py and ran apply_theme() before
@@ -231,6 +240,7 @@ class MainWindow(QMainWindow):
         self.layers_dock = QDockWidget("Project", self)
         self.layers_dock.setWidget(self.layers_panel)
         self.layers_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.layers_dock.setTitleBarWidget(DockTitleBar("Project"))
         self.addDockWidget(Qt.LeftDockWidgetArea, self.layers_dock)
 
         self.properties_panel = PropertiesPanel(scene, self)
@@ -238,6 +248,7 @@ class MainWindow(QMainWindow):
         self.properties_dock = QDockWidget("Properties", self)
         self.properties_dock.setWidget(self.properties_panel)
         self.properties_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.properties_dock.setTitleBarWidget(DockTitleBar("Properties"))
         self.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
 
         # Eyedropper output — per-project swatch list (see meta.color_swatches),
@@ -249,6 +260,7 @@ class MainWindow(QMainWindow):
         self.swatches_dock = QDockWidget("Swatches", self)
         self.swatches_dock.setWidget(self.swatches_panel)
         self.swatches_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.swatches_dock.setTitleBarWidget(DockTitleBar("Swatches"))
         self.addDockWidget(Qt.RightDockWidgetArea, self.swatches_dock)
         self.tabifyDockWidget(self.properties_dock, self.swatches_dock)
 
@@ -373,6 +385,17 @@ class MainWindow(QMainWindow):
         )
         self.ruler_action.setChecked(True)
         view_menu.addSeparator()
+        # Not "Tab" despite that being the conventional distraction-free
+        # key in Photoshop/Krita/Blender: a bare Tab QAction shortcut here
+        # would compete with normal Tab-to-next-field focus navigation in
+        # every QLineEdit/QSpinBox this app is full of (the Project Panel
+        # search box, every Properties field, every dialog) — which of the
+        # two wins is Qt-focus-state-dependent and not something worth
+        # shipping without being able to verify it against a real, focused
+        # text field. Ctrl+Shift+F has no such ambiguity.
+        self.focus_mode_action = self._add_action(
+            view_menu, "Focus Mode", "Ctrl+Shift+F", self.toggle_focus_mode, checkable=True,
+        )
         self._add_action(view_menu, "Change Desk Color…", None, self._change_desk_color, icon_name="eye")
         self.palette_action = self._add_action(
             view_menu, "Command Palette…", "Ctrl+K", self.open_command_palette
@@ -402,6 +425,7 @@ class MainWindow(QMainWindow):
         # is exactly one object per action now, so that's structurally
         # impossible.
         toolbar = QToolBar("Main")
+        self.toolbar = toolbar
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         toolbar.setIconSize(QSize(22, 22))
@@ -419,6 +443,37 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.fit_action)
         toolbar.addSeparator()
         toolbar.addAction(self.lock_action)
+
+    # -- focus mode -------------------------------------------------------
+    def toggle_focus_mode(self, entering: bool) -> None:
+        """"Clear the Bench": hide the toolbar and every dock so nothing
+        but the canvas (and the menu bar, kept for File/Ctrl+K
+        discoverability) is on screen. The structural lesson taken from
+        PureRef's canvas-first identity, without adopting its chrome-less
+        floating-window model, which doesn't fit this app's docked,
+        project-based shape. Dock visibility is snapshotted and restored
+        exactly, not blanket-reshown, since Properties/Swatches are
+        tabified — only one of them may have actually been visible/active
+        going in.
+        """
+        docks = [self.layers_dock, self.properties_dock, self.swatches_dock]
+        if entering:
+            self._pre_focus_dock_visible = {id(d): d.isVisible() for d in docks if d is not None}
+            self._pre_focus_toolbar_visible = self.toolbar.isVisible()
+            for dock in docks:
+                if dock is not None:
+                    dock.setVisible(False)
+            self.toolbar.setVisible(False)
+            self.statusBar().showMessage("Focus Mode — Ctrl+Shift+F to exit", 0)
+        else:
+            for dock in docks:
+                if dock is not None:
+                    dock.setVisible(self._pre_focus_dock_visible.get(id(dock), True))
+            self.toolbar.setVisible(self._pre_focus_toolbar_visible)
+            self.statusBar().clearMessage()
+        self._focus_mode = entering
+        if self.focus_mode_action.isChecked() != entering:
+            self.focus_mode_action.setChecked(entering)
 
     # -- appearance -----------------------------------------------------
     def _change_desk_color(self) -> None:

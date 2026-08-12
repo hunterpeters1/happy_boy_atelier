@@ -28,9 +28,19 @@ def qapp():
     it as a fixture parameter in any test that touches QGraphicsScene,
     QGraphicsItem, QPixmap, etc. — those all require an application
     instance to exist first, even headless.
+
+    Org/app name are set to isolated test-only values *before* the
+    QApplication is constructed — MainWindow.__init__ (and anything else
+    reaching for a bare QSettings()) resolves its registry-backed store
+    from these, and CLAUDE.md is explicit that any MainWindow/QApplication
+    built outside main.py without this would read and write the real
+    user's actual recent-files/appearance settings.
     """
+    from PySide6.QtCore import QCoreApplication
     from PySide6.QtWidgets import QApplication
 
+    QCoreApplication.setOrganizationName("HappyBoyAtelierTests")
+    QCoreApplication.setApplicationName("HappyBoyAtelierTests")
     app = QApplication.instance()
     if app is None:
         app = QApplication(["happy_boy_atelier_tests"])

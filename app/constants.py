@@ -158,3 +158,10 @@ FONT_FAMILY_MONO = "Consolas"
 # right-pinned row buttons never render under the scrollbar's stripe) —
 # one source of truth so the two can't drift out of sync.
 SCROLLBAR_WIDTH_PX = 8
+
+# "Rivets holding the panel plate together" — a small hardware motif
+# reused by both CanvasScene.drawBackground() (canvas corners) and
+# app/panels/dock_title_bar.py (dock title bars), one shared radius so the
+# two read as the same piece of hardware rather than two independently-
+# sized ones.
+RIVET_RADIUS_PX = 2.0

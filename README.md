@@ -101,9 +101,10 @@ looking for "is there a way to…", check here before assuming there isn't.
 
 Each imported photo is its own object:
 
-- **Drag** to move — snaps its center to the canvas center or to any
-  other *visible* reference image's center; hold **Alt** to bypass
-  snapping.
+- **Drag** to move — snaps its center to the canvas center, to any other
+  *visible* reference image's center, or to a Rule of Thirds/Golden Ratio
+  guide intersection if that guide is currently turned on (Project Panel
+  > Guides); hold **Alt** to bypass snapping entirely.
 - **Resize** via corner handles — free (independent width/height) by
   default; hold **Shift** to lock aspect ratio.
 - **Rotate** via the handle above the image; hold **Shift** to snap to
@@ -213,6 +214,9 @@ needed.
   lighting rows have up/down buttons (step-by-step reorder) plus
   to-back/to-front buttons (absolute positioning) for adjusting stacking
   position within their layer (perspective and guide items don't reorder).
+  Item rows' eye/lock icons rest dim and rise to full opacity on hover —
+  a row you've actually hidden or locked stays legible even at rest, so
+  you don't have to hover every row to notice.
 - **Properties panel** (right dock) — edits whatever's currently
   selected. Select 2+ items to get a **Batch Edit** section: opacity
   nudges (±5%), scale nudges (×0.95/×1.05, only shown if every selected
@@ -233,7 +237,15 @@ needed.
 - **Pan** — hold Space and drag, or drag with the middle mouse button.
 - **Zoom** — plain mouse wheel (no modifier needed), 5%–2400% range;
   View > Zoom In/Out (Ctrl+=/Ctrl+-) or Fit Canvas (Ctrl+0).
-- **Rulers** — View > Show Rulers (Ctrl+R), on by default.
+- **Rulers** — View > Show Rulers (Ctrl+R), on by default. The canvas
+  corners also carry small print-production-style trim marks, plus a
+  monospace readout of the canvas's real physical dimensions near the
+  bottom-right corner, in whichever unit you set at New Painting.
+- **Focus Mode** — View > Focus Mode (Ctrl+Shift+F) hides the toolbar and
+  every dock so only the canvas (and the menu bar) remain, for stepping
+  back and just looking at the arrangement. Exiting restores every panel
+  to exactly the visibility it had going in — a panel you'd already
+  closed stays closed, nothing gets blanket-reshown.
 - **Desk Color** — View > Change Desk Color… opens a color picker for the
   void behind the canvas rect (the "desk" the painting sits on). Per-project
   and saved in the .atelier file — each painting can have a different desk

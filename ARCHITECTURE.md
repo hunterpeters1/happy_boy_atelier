@@ -55,6 +55,10 @@ happy_boy_atelier/
     panels/
       layers_panel.py           Project Panel dock: one outliner (every placed item, not just
                                  references), search filter, tool-activation buttons, perspective settings
+      row_hover.py               hover-reveal for Project Panel item-row icons (fades _RowButtons
+                                 via app/scrollbars.OpacityFade, not a QStyledItemDelegate)
+      dock_title_bar.py          custom QDockWidget title bar — same look as the QSS default, plus a
+                                 pair of corner rivets (see Icons/visual-language section below)
       properties_panel.py       Inspector dock: contextual single-item editor + multi-select batch edit
     dialogs/
       new_project_dialog.py     one always-editable W/H/unit picker + orientation-filtered presets
@@ -195,7 +199,12 @@ scale; dragging the rotate handle updates rotation around the item's
 center, snapping to 15° increments while Shift is held. This keeps
 "arrange references" feeling precise rather than fiddly. A plain body
 drag (not a handle drag) also snaps the image's center to the canvas
-center or to another visible reference image's center, within a
+center, to another visible reference image's center, or — only while the
+corresponding guide is actually turned on — to a Rule of Thirds/Golden
+Ratio intersection (`ReferenceImageItem._snap_position()` in
+`app/layers/reference_layer.py`; the intersection fractions are read
+straight off `GuidesLayerGroup.thirds`/`.golden`, not recomputed
+separately, so the two can't drift apart). All of this is within a
 zoom-independent catch radius — bypassed by holding Alt/Option, and
 guarded so it only applies during an actual interactive drag, never to a
 programmatic `setPos()` from undo/redo, batch align, or the Inspector's
@@ -208,6 +217,15 @@ position fields.
   (`ItemIsMovable`/`ItemIsSelectable` cleared everywhere); a status-bar
   banner and toolbar toggle make the state unmistakable. Unlock requires an
   explicit action (no accidental edits).
+- **Focus Mode** (`MainWindow.toggle_focus_mode()`, View menu,
+  Ctrl+Shift+F): a UI-chrome-only toggle, not a `Project`/undo-stack
+  state — hides the toolbar and every dock so only the canvas and menu
+  bar remain, then restores each dock's exact prior visibility on exit
+  (not a blanket re-show, since Properties/Swatches are tabified and only
+  one may have been the visible/active tab going in). The structural
+  lesson taken from PureRef's canvas-first identity without adopting its
+  chrome-less floating-window model, which doesn't fit this app's docked,
+  project-based shape.
 
 Projector mode (a separate fullscreen tracing-aid window) existed here
 through the UX redesign below but has been removed entirely, along with
@@ -271,6 +289,59 @@ resting dark background and its checked/brass-filled state. This is the
 meant to hold per the file-structure comment below, but which was never
 actually built — that folder holds only the window/taskbar icon
 (`app.ico`/`app.png`).
+
+## Hover-reveal row icons (`app/panels/row_hover.py`)
+
+The Project Panel's item-row eye/lock (and, where present, reorder)
+buttons rest at a dim opacity and rise to full opacity only while the
+pointer is over that row — previously always fully visible, which read as
+UI clutter across a painting with many placed items. `layers_panel.py`'s
+own docstring long assumed this needed a custom `QStyledItemDelegate`
+rewrite; it doesn't. `_RowButtons` is already a persistent `QWidget`
+embedded per row via `setItemWidget()`, so it can be faded with the exact
+`OpacityFade` class `app/scrollbars.py` already uses for scrollbar
+handles (same 150ms fade / 500ms hide-delay timing, reused not
+reinvented — both symbols were promoted from that module's own
+underscore-private names to public ones specifically so this second
+consumer could import them without duplicating the animation
+bookkeeping). `row_hover.py` is a thin `QObject` event filter on the
+tree's viewport that tells whichever row's `_RowButtons` is under the
+cursor to reveal itself and the previously-hovered one to rest back down;
+`_RowButtons` itself owns `is_default_state()`/`set_row_hovered()` and
+keeps a non-default row (one whose lock/visibility was actually toggled
+away from the default) at a near-full rest opacity rather than fading it
+to near-invisible — losing the only visual cue that an item is
+locked/hidden until you happen to hover it would be a regression, not
+polish. Layer-header rows are never marked `hoverable` and stay
+full-opacity structural navigation, not per-item detail.
+
+## Hardware motifs: rivets and trim marks
+
+Two small `QPainter`-level additions, both reusing painters/pens/fonts
+already set up at their call sites (no new assets, no gradients, no
+rounded shapes, matching this file's "machined panel plate" rule):
+
+- **Corner rivets** — `CanvasScene._draw_corner_rivets()` paints four
+  small filled `C.COLOR_LINE` marks just inside each canvas corner
+  (`drawBackground()`), and `app/panels/dock_title_bar.py`'s
+  `DockTitleBar` (set via `QDockWidget.setTitleBarWidget()`, replacing
+  the QSS-only default title bar for the Project/Properties/Swatches
+  docks) paints the same pair at its own left/right edges in its
+  `paintEvent()`. Deliberately neutral-line-colored, not brass — rivets
+  read as structural hardware, not an interactive accent. `C.RIVET_RADIUS_PX`
+  is the one shared size constant between the two call sites.
+- **Trim marks + dimension callout** — `CanvasView.drawForeground()`
+  (the same view-space painter already drawing the brass ruler ticks)
+  gains short L-shaped crop-mark ticks just outside each canvas corner
+  (`_draw_trim_marks()`, the actual print-production/technical-drawing
+  trim-mark convention) plus a monospace readout of the canvas's real
+  physical dimensions in the artist's chosen unit near the bottom-right
+  corner (`_draw_dimension_callout()`, reading `CanvasSpec.width`/
+  `.height`/`.unit` directly — those are already in the artist's chosen
+  unit, no conversion needed). Turns the canvas from "a rectangle" into a
+  labeled technical artifact — the app's ownable identity marker, since
+  neither PureRef's chrome-less canvas nor Milanote's card-based one
+  frames its content this way.
 
 ## Export
 

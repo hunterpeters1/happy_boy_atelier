@@ -50,12 +50,14 @@ from PySide6.QtWidgets import (
 
 from .. import constants as C
 from .. import icons
+from .. import scrollbars
 from ..constants import LayerKind, PerspectiveMode
 from ..canvas.undo_commands import SetPerspectiveModeCommand, SetPropertyCommand
 from ..layers.reference_layer import ReferenceImageItem
 from ..layers.composition_layer import FocalPointItem, MovementLineItem, NoteItem
 from ..layers.lighting_layer import LightSourceItem, DirectionArrowItem
 from ..layers.perspective_layer import VanishingPointItem, HorizonLineItem
+from .row_hover import install_row_hover
 
 _ROLE_ITEM = Qt.UserRole
 # Compact row-button icon size — bumped alongside the toolbar/tree icon
@@ -104,6 +106,18 @@ class _RowButtons(QWidget):
     """The eye/lock toggle pair (plus, for reorderable item rows, an
     up/down stacking-order pair) used as column 1's item widget for both
     layer-header rows and individual item rows.
+
+    `hoverable=True` (item rows only — layer-header rows stay full-opacity
+    structural navigation, never hover-faded) makes this widget own a
+    self-managed opacity fade: it rests dim when the pointer is elsewhere,
+    rises to full opacity while RowHoverFilter (row_hover.py) reports the
+    pointer over this row, matching how app/scrollbars.py already fades
+    scrollbar handles (same OpacityFade class/timing, reused not
+    reinvented). A row whose lock or visibility has actually been toggled
+    away from its default stays near-full opacity even at rest, so "this
+    item is locked/hidden" doesn't require hovering every row to notice —
+    fading a non-default state down to near-invisible would be a
+    regression, not polish.
     """
 
     visibility_toggled = Signal(bool)
@@ -113,10 +127,16 @@ class _RowButtons(QWidget):
     send_to_back_clicked = Signal()
     bring_to_front_clicked = Signal()
 
+    _REST_OPACITY_DEFAULT = 0.35
+    _REST_OPACITY_NONDEFAULT = 0.9
+
     def __init__(self, *, visible: bool, locked: bool, show_visibility: bool = True,
                  show_lock: bool = True, can_move_forward: bool | None = None,
-                 can_move_backward: bool | None = None, parent=None):
+                 can_move_backward: bool | None = None, hoverable: bool = False, parent=None):
         super().__init__(parent)
+        self.hoverable = hoverable
+        self._fade: scrollbars.OpacityFade | None = None
+        self._row_hovered = False
         layout = QHBoxLayout(self)
         # Right margin reserves real clearance for the vertical scrollbar
         # (C.SCROLLBAR_WIDTH_PX), not just a cosmetic gap — measured at
@@ -211,8 +231,38 @@ class _RowButtons(QWidget):
             self.eye_btn.toggled.connect(self.visibility_toggled)
             layout.addWidget(self.eye_btn)
 
+        if hoverable:
+            self._fade = scrollbars.OpacityFade(self)
+            self._fade.effect.setOpacity(self._rest_opacity())
+            self.lock_toggled.connect(lambda _on: self._refresh_rest_opacity())
+            self.visibility_toggled.connect(lambda _on: self._refresh_rest_opacity())
+
     def _on_lock_toggled(self, on: bool) -> None:
         self.lock_btn.setIcon(icons.icon("lock" if on else "unlock", _ROW_ICON_PX))
+
+    def is_default_state(self) -> bool:
+        if getattr(self, "lock_btn", None) is not None and self.lock_btn.isChecked():
+            return False
+        if getattr(self, "eye_btn", None) is not None and not self.eye_btn.isChecked():
+            return False
+        return True
+
+    def _rest_opacity(self) -> float:
+        return self._REST_OPACITY_DEFAULT if self.is_default_state() else self._REST_OPACITY_NONDEFAULT
+
+    def _refresh_rest_opacity(self) -> None:
+        if self._fade is None or self._row_hovered:
+            return
+        self._fade.fade_to(self._rest_opacity())
+
+    def set_row_hovered(self, hovered: bool) -> None:
+        """Called by RowHoverFilter (row_hover.py) as the pointer enters/
+        leaves this row. No-op for a non-hoverable (layer-header) instance.
+        """
+        if self._fade is None:
+            return
+        self._row_hovered = hovered
+        self._fade.fade_to(1.0 if hovered else self._rest_opacity())
 
 
 class LayersPanel(QWidget):
@@ -294,6 +344,7 @@ class LayersPanel(QWidget):
         self.tree.setColumnWidth(1, 169)
         self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
         outer.addWidget(self.tree, 1)
+        install_row_hover(self.tree)
 
         self.refresh_structure()
 
@@ -432,6 +483,7 @@ class LayersPanel(QWidget):
         buttons = _RowButtons(
             visible=obj.isVisible(), locked=obj.is_locked(),
             can_move_forward=can_fwd, can_move_backward=can_back,
+            hoverable=True,
         )
         buttons.visibility_toggled.connect(obj.setVisible)
         buttons.lock_toggled.connect(obj.set_locked)

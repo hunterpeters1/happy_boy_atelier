@@ -276,6 +276,7 @@ class CanvasView(QGraphicsView):
         top_left_view = self.mapFromScene(canvas_rect.topLeft())
         top_right_view = self.mapFromScene(canvas_rect.topRight())
         bottom_left_view = self.mapFromScene(canvas_rect.bottomLeft())
+        bottom_right_view = self.mapFromScene(canvas_rect.bottomRight())
 
         # top ruler ticks (every inch)
         width_in = canvas_rect.width() / px_per_in
@@ -293,4 +294,39 @@ class CanvasView(QGraphicsView):
             painter.drawLine(top_left_view.x() - 8, view_pt.y(), top_left_view.x(), view_pt.y())
             if i % 1 == 0:
                 painter.drawText(top_left_view.x() - 26, view_pt.y() - 2, str(i))
+
+        self._draw_trim_marks(painter, top_left_view, top_right_view, bottom_left_view, bottom_right_view)
+        self._draw_dimension_callout(painter, bottom_right_view)
         painter.restore()
+
+    def _draw_trim_marks(self, painter: QPainter, top_left, top_right, bottom_left, bottom_right) -> None:
+        """Short L-shaped ticks just outside each canvas corner, the same
+        convention print-production sheets and technical drawings use to
+        mark trim boundaries — distinct from the ruler's own tick marks
+        (those read the surface; these mark it as a physical object being
+        prepared for output, this app's actual premise). Same brass pen
+        already set up by the caller; no new state.
+        """
+        gap, length = 3, 6
+        for corner, (dx, dy) in (
+            (top_left, (-1, -1)), (top_right, (1, -1)),
+            (bottom_left, (-1, 1)), (bottom_right, (1, 1)),
+        ):
+            painter.drawLine(corner.x() + dx * gap, corner.y(), corner.x() + dx * (gap + length), corner.y())
+            painter.drawLine(corner.x(), corner.y() + dy * gap, corner.x(), corner.y() + dy * (gap + length))
+
+    def _draw_dimension_callout(self, painter: QPainter, bottom_right_view) -> None:
+        """A live monospace readout of the canvas's real physical
+        dimensions, in whichever unit the artist chose at New Painting —
+        turns the canvas from "a rectangle" into a labeled technical
+        artifact. Anchored off the bottom-right corner, clear of the
+        ruler's own tick labels along the top/left edges.
+        """
+        spec = getattr(self.scene(), "canvas_spec", None)
+        if spec is None:
+            return
+        label = f"{spec.width:.3f} × {spec.height:.3f} {spec.unit.upper()}"
+        metrics = painter.fontMetrics()
+        x = bottom_right_view.x() - metrics.horizontalAdvance(label)
+        y = bottom_right_view.y() + metrics.ascent() + 10
+        painter.drawText(x, y, label)
