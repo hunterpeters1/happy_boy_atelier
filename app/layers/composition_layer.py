@@ -4,17 +4,21 @@ artist places every mark by hand — nothing here is computed or suggested.
 
 from __future__ import annotations
 
+import math
 import uuid
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
+    QApplication,
     QGraphicsItemGroup,
     QGraphicsTextItem,
 )
 
 from .. import constants as C
 from ..canvas.interactive_item import InteractiveItem
+from ..canvas.point_handle import TwoPointHandle
+from .reference_layer import ROTATION_SNAP_DEG
 from .stacking_mixin import StackedLayerMixin
 
 MARKER_R_PRIMARY = 11
@@ -91,7 +95,6 @@ class MovementLineItem(InteractiveItem):
         if len(self._points) >= 2:
             end = self._points[-1]
             prev = self._points[-2]
-            import math
             angle = math.atan2(end.y() - prev.y(), end.x() - prev.x())
             size = 8
             p1 = QPointF(end.x() - size * math.cos(angle - 0.4), end.y() - size * math.sin(angle - 0.4))
@@ -115,6 +118,148 @@ class MovementLineItem(InteractiveItem):
     def from_dict(d: dict) -> "MovementLineItem":
         pts = [QPointF(x, y) for x, y in d.get("points", [[0, 0], [60, 0]])]
         return MovementLineItem(pts, line_id=d.get("id"))
+
+
+def _snap_to_angle(pivot: QPointF, point: QPointF, step_deg: float) -> QPointF:
+    """`point` re-expressed at the same distance from `pivot` but at the
+    nearest multiple of `step_deg` — MeasurementItem's Shift-drag angle
+    snap, the same round(angle / step) * step pattern
+    reference_layer.py's rotate-handle snap already uses for
+    ROTATION_SNAP_DEG, applied to an endpoint-around-a-pivot instead of a
+    whole-image rotation.
+    """
+    dx, dy = point.x() - pivot.x(), point.y() - pivot.y()
+    distance = math.hypot(dx, dy)
+    if distance == 0:
+        return QPointF(point)
+    snapped_deg = round(math.degrees(math.atan2(dy, dx)) / step_deg) * step_deg
+    rad = math.radians(snapped_deg)
+    return QPointF(pivot.x() + distance * math.cos(rad), pivot.y() + distance * math.sin(rad))
+
+
+class MeasurementItem(InteractiveItem):
+    """A ruler and protractor in one: a two-point segment reporting both
+    its length (in the canvas's own display unit) and its angle from
+    horizontal. Endpoints are independently draggable via TwoPointHandle
+    (app/canvas/point_handle.py) — the same shared handle
+    DirectionArrowItem (lighting_layer.py) uses, not a new interaction
+    mechanism. Persists and undoes exactly like every other composition
+    marker; the only thing computed here is the arithmetic display label
+    itself (length/angle from the two points the artist placed) — the
+    software never infers what to measure.
+    """
+
+    def __init__(self, p1: QPointF, p2: QPointF, measurement_id: str | None = None):
+        super().__init__()
+        self.measurement_id = measurement_id or str(uuid.uuid4())
+        self._p1 = p1
+        self._p2 = p2
+        # Between movement lines (9) and focal points (10) -- see
+        # CompositionLayerGroup._Z_BAND_MEASUREMENT below for the real
+        # per-item stacking band; this constructor-time value only matters
+        # before the item is ever added to a group.
+        self.setZValue(9.5)
+        self.set_normal_cursor(Qt.PointingHandCursor)
+        self._h1 = TwoPointHandle(self, "p1", undo_text="Move measurement")
+        self._h2 = TwoPointHandle(self, "p2", undo_text="Move measurement")
+        self._reposition_handles()
+
+    def color(self) -> str:
+        return C.COLOR_PERSPECTIVE
+
+    def _reposition_handles(self) -> None:
+        self._h1.setPos(self._p1)
+        self._h2.setPos(self._p2)
+
+    def points(self) -> tuple[QPointF, QPointF]:
+        return (QPointF(self._p1), QPointF(self._p2))
+
+    def set_points(self, points: tuple[QPointF, QPointF]) -> None:
+        self.prepareGeometryChange()
+        self._p1, self._p2 = QPointF(points[0]), QPointF(points[1])
+        self._reposition_handles()
+        self.update()
+
+    def set_point(self, which: str, local: QPointF) -> None:
+        """Called by each endpoint's TwoPointHandle while dragging. Holding
+        Shift snaps the dragged endpoint's angle around the *other*
+        endpoint to the nearest ROTATION_SNAP_DEG increment — the same
+        modifier/convention as rotating a reference image, applied to a
+        ruler instead.
+        """
+        self.prepareGeometryChange()
+        pivot = self._p2 if which == "p1" else self._p1
+        if QApplication.keyboardModifiers() & Qt.ShiftModifier:
+            local = _snap_to_angle(pivot, local, ROTATION_SNAP_DEG)
+        if which == "p1":
+            self._p1 = local
+        else:
+            self._p2 = local
+        self._reposition_handles()
+        self.update()
+
+    def _display_unit(self) -> str:
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "canvas_spec"):
+            return scene.canvas_spec.unit
+        return "in"
+
+    def length_and_angle(self) -> tuple[float, float]:
+        """(length in the canvas's own display unit, angle from horizontal
+        in degrees, positive = counterclockwise) — pure arithmetic on the
+        two points the artist placed.
+        """
+        dx = self._p2.x() - self._p1.x()
+        dy = self._p2.y() - self._p1.y()
+        length_in = math.hypot(dx, dy) / C.SCENE_PX_PER_INCH
+        length = C.from_inches(length_in, self._display_unit())
+        angle = math.degrees(math.atan2(-dy, dx))
+        return length, angle
+
+    def display_label(self) -> str:
+        length, angle = self.length_and_angle()
+        return f"{length:.1f} {self._display_unit()} · {angle:.0f}°"
+
+    def boundingRect(self) -> QRectF:
+        xs = [self._p1.x(), self._p2.x()]
+        ys = [self._p1.y(), self._p2.y()]
+        pad = 24  # room for the end ticks and the label past either point
+        return QRectF(min(xs) - pad, min(ys) - pad, max(xs) - min(xs) + 2 * pad, max(ys) - min(ys) + 2 * pad)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        color = QColor(self.color())
+        painter.setPen(QPen(color, 1.5))
+        painter.drawLine(self._p1, self._p2)
+        # Ruler-style perpendicular ticks at each end -- visually distinct
+        # from a plain MovementLineItem segment at a glance.
+        dx, dy = self._p2.x() - self._p1.x(), self._p2.y() - self._p1.y()
+        length = math.hypot(dx, dy) or 1.0
+        nx, ny = -dy / length * 6, dx / length * 6
+        painter.drawLine(QPointF(self._p1.x() - nx, self._p1.y() - ny), QPointF(self._p1.x() + nx, self._p1.y() + ny))
+        painter.drawLine(QPointF(self._p2.x() - nx, self._p2.y() - ny), QPointF(self._p2.x() + nx, self._p2.y() + ny))
+        painter.setFont(QFont(C.FONT_FAMILY_MONO, 8))
+        mid = QPointF((self._p1.x() + self._p2.x()) / 2, (self._p1.y() + self._p2.y()) / 2)
+        painter.drawText(mid + QPointF(6, -6), self.display_label())
+        if self.is_app_selected():
+            painter.setPen(QPen(QColor(C.COLOR_BRASS), 1, Qt.DotLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self.boundingRect())
+
+    def to_dict(self) -> dict:
+        pos = self.pos()
+        return {
+            "id": self.measurement_id,
+            "x1": self._p1.x() + pos.x(), "y1": self._p1.y() + pos.y(),
+            "x2": self._p2.x() + pos.x(), "y2": self._p2.y() + pos.y(),
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> "MeasurementItem":
+        return MeasurementItem(
+            QPointF(float(d.get("x1", 0)), float(d.get("y1", 0))),
+            QPointF(float(d.get("x2", 100)), float(d.get("y2", 0))),
+            measurement_id=d.get("id"),
+        )
 
 
 class _NoteTextItem(QGraphicsTextItem):
@@ -241,13 +386,14 @@ class CompositionLayerGroup(StackedLayerMixin, QGraphicsItemGroup):
     """
 
     # Stacking bands, widest gap first: movement lines always print under
-    # focal points, which always print under notes (so a note's "i" stays
-    # legible even parked on top of a marker) — that hierarchy is fixed,
-    # matching each item class's own historical setZValue() call. What the
-    # Project Panel's up/down buttons control is the order *within* one
-    # band (e.g. which of two overlapping notes prints on top of the
-    # other) — see _reassign_z().
+    # measurements, which always print under focal points, which always
+    # print under notes (so a note's "i" stays legible even parked on top
+    # of a marker) — that hierarchy is fixed, matching each item class's
+    # own historical setZValue() call. What the Project Panel's up/down
+    # buttons control is the order *within* one band (e.g. which of two
+    # overlapping notes prints on top of the other) — see _reassign_z().
     _Z_BAND_MOVEMENT = 9.0
+    _Z_BAND_MEASUREMENT = 9.5
     _Z_BAND_FOCAL = 10.0
     _Z_BAND_NOTE = 11.0
     _Z_STEP = 0.01
@@ -257,6 +403,7 @@ class CompositionLayerGroup(StackedLayerMixin, QGraphicsItemGroup):
         self.setHandlesChildEvents(False)
         self.focal_points: list[FocalPointItem] = []
         self.movement_lines: list[MovementLineItem] = []
+        self.measurements: list[MeasurementItem] = []
         self.notes: list[NoteItem] = []
 
     def add_existing(self, item, index: int | None = None) -> None:
@@ -287,6 +434,8 @@ class CompositionLayerGroup(StackedLayerMixin, QGraphicsItemGroup):
             return self.focal_points
         if isinstance(item, MovementLineItem):
             return self.movement_lines
+        if isinstance(item, MeasurementItem):
+            return self.measurements
         if isinstance(item, NoteItem):
             return self.notes
         return None
@@ -294,6 +443,8 @@ class CompositionLayerGroup(StackedLayerMixin, QGraphicsItemGroup):
     def _reassign_z(self) -> None:
         for i, item in enumerate(self.movement_lines):
             item.setZValue(self._Z_BAND_MOVEMENT + i * self._Z_STEP)
+        for i, item in enumerate(self.measurements):
+            item.setZValue(self._Z_BAND_MEASUREMENT + i * self._Z_STEP)
         for i, item in enumerate(self.focal_points):
             item.setZValue(self._Z_BAND_FOCAL + i * self._Z_STEP)
         for i, item in enumerate(self.notes):
@@ -312,7 +463,7 @@ class CompositionLayerGroup(StackedLayerMixin, QGraphicsItemGroup):
         return item
 
     def all_items(self):
-        return [*self.focal_points, *self.movement_lines, *self.notes]
+        return [*self.focal_points, *self.movement_lines, *self.measurements, *self.notes]
 
     def clear(self) -> None:
         for item in self.all_items():
@@ -326,6 +477,7 @@ class CompositionLayerGroup(StackedLayerMixin, QGraphicsItemGroup):
         return {
             "focal_points": [f.to_dict() for f in self.focal_points],
             "movement_lines": [m.to_dict() for m in self.movement_lines],
+            "measurements": [m.to_dict() for m in self.measurements],
             "notes": [n.to_dict() for n in self.notes],
         }
 
@@ -339,6 +491,10 @@ class CompositionLayerGroup(StackedLayerMixin, QGraphicsItemGroup):
             item = MovementLineItem.from_dict(m)
             self.addToGroup(item)
             self.movement_lines.append(item)
+        for m in data.get("measurements", []):
+            item = MeasurementItem.from_dict(m)
+            self.addToGroup(item)
+            self.measurements.append(item)
         for n in data.get("notes", []):
             item = NoteItem.from_dict(n, color=C.COLOR_BRASS)
             self.addToGroup(item)

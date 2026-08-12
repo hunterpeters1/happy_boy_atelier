@@ -24,7 +24,7 @@ from .. import constants as C
 from .. import icons
 from ..canvas.undo_commands import SetNoteTextCommand, SetPropertyCommand
 from ..layers.reference_layer import ReferenceImageItem
-from ..layers.composition_layer import FocalPointItem, MovementLineItem, NoteItem
+from ..layers.composition_layer import FocalPointItem, MeasurementItem, MovementLineItem, NoteItem
 from ..layers.lighting_layer import LightSourceItem, DirectionArrowItem
 from ..layers.perspective_layer import VanishingPointItem, HorizonLineItem
 
@@ -71,6 +71,8 @@ class PropertiesPanel(QWidget):
         self._blur_edit_item = None
         self._clarity_baseline = None
         self._clarity_edit_item = None
+        self._grayscale_baseline = None
+        self._grayscale_edit_item = None
         # Recomputing the Study Blur preview costs real time (numpy work,
         # ~100ms+ even at its capped working resolution — see
         # reference_layer.py's BLUR_WORKING_DIM) unlike every other slider
@@ -194,6 +196,25 @@ class PropertiesPanel(QWidget):
         self.clarity_slider.sliderReleased.connect(lambda: self._on_blur_field_released("clarity"))
         clarity_row.addWidget(self.clarity_slider)
         tform.addLayout(clarity_row)
+
+        # "Value Check": non-destructive desaturate for judging value
+        # relationships without color as a confound — same cache/export-
+        # flag family as Blur/Line Clarity above (see study_blur.py).
+        grayscale_row = QHBoxLayout()
+        grayscale_row.addWidget(QLabel("Value Check"))
+        self.grayscale_slider = QSlider(Qt.Horizontal)
+        self.grayscale_slider.setRange(0, 100)
+        self.grayscale_slider.setToolTip(
+            "Desaturate the reference image on screen — judge value "
+            "(light/dark) relationships without color as a distraction. "
+            "Never alters the saved image; off by default for exports "
+            "too (see the Export dialog)."
+        )
+        self.grayscale_slider.valueChanged.connect(lambda v: self._on_blur_field_changed("grayscale", v))
+        self.grayscale_slider.sliderPressed.connect(lambda: self._on_blur_field_pressed("grayscale"))
+        self.grayscale_slider.sliderReleased.connect(lambda: self._on_blur_field_released("grayscale"))
+        grayscale_row.addWidget(self.grayscale_slider)
+        tform.addLayout(grayscale_row)
 
         # Reset-crop button — crop is now direct manipulation via edge
         # handles on the canvas; this button just clears the crop back to
@@ -391,6 +412,7 @@ class PropertiesPanel(QWidget):
                 self.opacity_slider.setValue(int(item.opacity() * 100))
                 self.blur_slider.setValue(int(item.blur_amount()))
                 self.clarity_slider.setValue(int(item.line_clarity()))
+                self.grayscale_slider.setValue(int(item.grayscale_amount()))
                 self.lock_box.setChecked(item.is_locked())
                 self._scale_last = item.scale_factor()
                 self._rotation_last = item.rotation()
@@ -410,6 +432,10 @@ class PropertiesPanel(QWidget):
 
             elif isinstance(item, MovementLineItem):
                 self.title.setText("Movement Line")
+                self.delete_btn.setVisible(True)
+
+            elif isinstance(item, MeasurementItem):
+                self.title.setText(f"Measurement — {item.display_label()}")
                 self.delete_btn.setVisible(True)
 
             elif isinstance(item, DirectionArrowItem):
@@ -596,7 +622,7 @@ class PropertiesPanel(QWidget):
             if old != new:
                 self._push_property(item.setOpacity, old, new, "Change opacity")
 
-    # -- Study Blur ---------------------------------------------------------
+    # -- Study Blur / Value Check --------------------------------------------
     def _on_blur_field_pressed(self, field: str) -> None:
         if self._current is None or not isinstance(self._current, ReferenceImageItem):
             return
@@ -608,9 +634,12 @@ class PropertiesPanel(QWidget):
         if field == "blur":
             self._blur_baseline = item.blur_amount()
             self._blur_edit_item = item
-        else:
+        elif field == "clarity":
             self._clarity_baseline = item.line_clarity()
             self._clarity_edit_item = item
+        else:
+            self._grayscale_baseline = item.grayscale_amount()
+            self._grayscale_edit_item = item
 
     def _on_blur_field_changed(self, field: str, value: int) -> None:
         if self._updating or self._current is None:
@@ -618,16 +647,19 @@ class PropertiesPanel(QWidget):
         item = self._current
         if field == "blur":
             item.set_blur_amount(value)
-        else:
+        elif field == "clarity":
             item.set_line_clarity(value)
+        else:
+            item.set_grayscale_amount(value)
         # Only schedules the debounced preview recompute — set_blur_amount()/
-        # set_line_clarity() above already trigger a plain repaint via
-        # update(), which redraws whatever's still cached from before this
-        # tick (see ReferenceImageItem._get_processed_display_pixmap()).
+        # set_line_clarity()/set_grayscale_amount() above already trigger a
+        # plain repaint via update(), which redraws whatever's still
+        # cached from before this tick (see ReferenceImageItem.
+        # _get_processed_display_pixmap()).
         self._blur_preview_timer.start()
 
     def _apply_blur_preview(self) -> None:
-        item = self._blur_edit_item or self._clarity_edit_item or self._current
+        item = self._blur_edit_item or self._clarity_edit_item or self._grayscale_edit_item or self._current
         if isinstance(item, ReferenceImageItem):
             item._refresh_processed_pixmap()
             item.update()
@@ -637,10 +669,14 @@ class PropertiesPanel(QWidget):
             baseline, item = self._blur_baseline, self._blur_edit_item
             self._blur_baseline = None
             self._blur_edit_item = None
-        else:
+        elif field == "clarity":
             baseline, item = self._clarity_baseline, self._clarity_edit_item
             self._clarity_baseline = None
             self._clarity_edit_item = None
+        else:
+            baseline, item = self._grayscale_baseline, self._grayscale_edit_item
+            self._grayscale_baseline = None
+            self._grayscale_edit_item = None
         if baseline is None or item is None:
             return
         self._finish_blur_drag(field, baseline, item)
@@ -657,16 +693,20 @@ class PropertiesPanel(QWidget):
         self._blur_preview_timer.stop()
         item._refresh_processed_pixmap()
         item.update()
-        new = item.blur_amount() if field == "blur" else item.line_clarity()
+        if field == "blur":
+            new, setter, label = item.blur_amount(), item.set_blur_amount, "Change blur"
+        elif field == "clarity":
+            new, setter, label = item.line_clarity(), item.set_line_clarity, "Change line clarity"
+        else:
+            new, setter, label = item.grayscale_amount(), item.set_grayscale_amount, "Change value check"
         if baseline != new:
-            setter = item.set_blur_amount if field == "blur" else item.set_line_clarity
-            label = "Change blur" if field == "blur" else "Change line clarity"
             self._push_property(setter, baseline, new, label)
 
     def _abort_pending_blur_drag(self, new_item) -> None:
         """Called at the top of _apply() (every refresh: selection
-        change, undo/redo, item add/delete) — if a Blur/Line Clarity
-        press is still pending (mouse down, sliderReleased never fired)
+        change, undo/redo, item add/delete) — if a Blur/Line Clarity/
+        Value Check press is still pending (mouse down, sliderReleased
+        never fired)
         for an item that's about to stop being the selection, finish it
         as an implicit release instead of leaving set_defer_blur_refresh
         (True) stuck forever on an item nothing will ever un-defer again
@@ -683,6 +723,10 @@ class PropertiesPanel(QWidget):
             self._finish_blur_drag("clarity", self._clarity_baseline, self._clarity_edit_item)
             self._clarity_baseline = None
             self._clarity_edit_item = None
+        if self._grayscale_edit_item is not None and self._grayscale_edit_item is not new_item:
+            self._finish_blur_drag("grayscale", self._grayscale_baseline, self._grayscale_edit_item)
+            self._grayscale_baseline = None
+            self._grayscale_edit_item = None
 
     def _on_lock_toggled(self, on: bool) -> None:
         # Lock state is deliberately excluded from undo/redo (Phase 0

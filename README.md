@@ -89,21 +89,47 @@ looking for "is there a way to…", check here before assuming there isn't.
   to a blank canvas.
 - **File > New Painting…** (Ctrl+N) — width/height/unit are always
   visible and editable; portrait/landscape/square presets just fill them
-  in, no separate "custom" mode to switch into.
+  in, no separate "custom" mode to switch into. A **My Templates** list
+  also appears here once you've saved at least one — see Project
+  templates below.
+- **Project templates** — **File > Save as Template…** saves the current
+  painting's canvas format and guide toggles (Rule of Thirds/Golden
+  Ratio/Inch Grid) under a name you pick, for reuse next time you start a
+  new painting. Deliberately never includes reference images or
+  composition/lighting content — a template only ever pre-fills the blank
+  canvas format and which guides start on, never artwork.
 - **Import** — File > Import Reference Image(s)… (Ctrl+I), or drag image
   files from your OS straight onto the canvas (multiple at once is fine —
   it's one undo step either way). Supported: PNG, JPG/JPEG, BMP, WEBP.
   **HEIC/HEIF is not supported here** — Qt has no HEIC decoder, so those
   files are silently ignored by drag-and-drop. Convert HEIC to JPEG first
   (the `uploader/` tool below does this automatically for phone photos).
+- **Reference Library** (dock, tabbed with the Project Panel) — a
+  personal, cross-project collection of images, separate from any single
+  painting's `.atelier` file or undo stack. Add images via its "Add
+  Images to Library…" button; drag a thumbnail out onto the canvas (or
+  double-click it) to import it into the current painting, same undoable
+  import as File > Import Reference Image(s)…. A search box filters by
+  name; right-click an entry to remove it from the library (the original
+  file on disk is never touched — the library keeps its own copy).
 
 ### Reference images
 
 Each imported photo is its own object:
 
-- **Drag** to move — snaps its center to the canvas center or to any
-  other *visible* reference image's center; hold **Alt** to bypass
-  snapping.
+- **Drag** to move — snaps its center to the canvas center, to any other
+  *visible* reference image's center, to a Rule of Thirds/Golden Ratio
+  guide intersection if that guide is currently turned on (Project Panel
+  > Guides), or edge-to-edge against the canvas bounds or another visible
+  image (its own edge landing flush with the target edge, not just
+  center-to-center); hold **Alt** to bypass snapping entirely.
+- **Selection toolbar** — selecting exactly one item on the canvas shows a
+  small floating toolbar just below it with Duplicate, Flip Horizontal
+  (reference images only), Lock, and Delete — the same actions as the
+  right-click menu and Edit menu, just closer to the item so you don't
+  have to travel to a dock for the common ones. Hides for a multi-select
+  (use the Properties panel's Batch Edit section there) and while
+  actively dragging the item.
 - **Resize** via corner handles — free (independent width/height) by
   default; hold **Shift** to lock aspect ratio.
 - **Rotate** via the handle above the image; hold **Shift** to snap to
@@ -135,6 +161,13 @@ Each imported photo is its own object:
   in exports by default**; the Export dialog has an explicit "Include
   Study Blur effect" checkbox if you want it baked into a specific
   export.
+- **Value Check** — a **Value Check** slider (0–100) alongside Blur/Line
+  Clarity non-destructively desaturates the image, for judging light/dark
+  value relationships without color as a distraction. Same display-only,
+  export-opt-in behavior as Study Blur, and composes with it (squint-test
+  and check values on the same photo at once). **Edit > Toggle Value
+  Check (All References)** flips every visible, unlocked reference image
+  at once — "step back and squint at the whole board" — as one undo step.
 - **Eyedropper** — tool button in the Project Panel's Reference section
   (not the toolbar). Arm it, then hover any reference image: a
   **Swatches** dock (tabbed with Properties) shows a live readout of the
@@ -156,6 +189,12 @@ section** (not the toolbar):
   second sets the end, with a dashed preview line following your cursor
   in between. Draws an arrowed path showing how the eye should move
   through the composition.
+- **Measurement** — a ruler and protractor in one: click-drag-click like
+  a movement line, but the placed segment shows a live readout of its
+  length (in the canvas's own unit) and its angle from horizontal, e.g.
+  `12.4 in · 37°`. Once placed, drag either end independently to adjust
+  it — hold **Shift** while dragging an endpoint to snap its angle to 15°
+  increments. Persists and undoes like any other composition marker.
 - **Note** — click to place a pin marker with an editable text label;
   double-click it on canvas, or use the Properties panel's text box, to
   edit.
@@ -208,11 +247,17 @@ needed.
 
 - **Project Panel** (left dock) — one outliner listing every layer and
   every item placed in it (not just reference images), each a named,
-  searchable row with inline visibility/lock toggles. A search box at
-  the top filters items by name across all layers. Reference/composition/
-  lighting rows have up/down buttons (step-by-step reorder) plus
-  to-back/to-front buttons (absolute positioning) for adjusting stacking
-  position within their layer (perspective and guide items don't reorder).
+  searchable row with inline visibility/lock toggles. Reference images
+  show a small square thumbnail of the actual photo instead of a generic
+  icon, so the list reads like a contact sheet. A search box at the top
+  filters items by name across all layers. Reference/composition/lighting
+  rows can be reordered within their own layer either by dragging a row
+  to a new position, or with the up/down (step-by-step) and to-back/
+  to-front (absolute) buttons — perspective and guide items don't reorder,
+  and a drag can't cross into a different layer's section. Item rows'
+  eye/lock icons rest dim and rise to full opacity on hover — a row
+  you've actually hidden or locked stays legible even at rest, so you
+  don't have to hover every row to notice.
 - **Properties panel** (right dock) — edits whatever's currently
   selected. Select 2+ items to get a **Batch Edit** section: opacity
   nudges (±5%), scale nudges (×0.95/×1.05, only shown if every selected
@@ -233,7 +278,15 @@ needed.
 - **Pan** — hold Space and drag, or drag with the middle mouse button.
 - **Zoom** — plain mouse wheel (no modifier needed), 5%–2400% range;
   View > Zoom In/Out (Ctrl+=/Ctrl+-) or Fit Canvas (Ctrl+0).
-- **Rulers** — View > Show Rulers (Ctrl+R), on by default.
+- **Rulers** — View > Show Rulers (Ctrl+R), on by default. The canvas
+  corners also carry small print-production-style trim marks, plus a
+  monospace readout of the canvas's real physical dimensions near the
+  bottom-right corner, in whichever unit you set at New Painting.
+- **Focus Mode** — View > Focus Mode (Ctrl+Shift+F) hides the toolbar and
+  every dock so only the canvas (and the menu bar) remain, for stepping
+  back and just looking at the arrangement. Exiting restores every panel
+  to exactly the visibility it had going in — a panel you'd already
+  closed stays closed, nothing gets blanket-reshown.
 - **Desk Color** — View > Change Desk Color… opens a color picker for the
   void behind the canvas rect (the "desk" the painting sits on). Per-project
   and saved in the .atelier file — each painting can have a different desk
@@ -277,6 +330,11 @@ Two independent lock mechanisms:
 **File > Export…** (Ctrl+E), one panel, destination pre-filled from the
 project name and updated live as you change format:
 
+- **Presets** — save the current Format/DPI/Study Blur combo under a name
+  ("Save Preset…") for exporting a batch of paintings the same way over
+  and over; the Preset dropdown recalls one instantly. Presets never
+  store the destination path — that's always re-derived from whichever
+  project you're exporting, on purpose.
 - **PNG or JPG** at a chosen **Output DPI** (72–1200, default 300).
 - **PDF Planning Sheet** — a single-page, letter-size, 300dpi PDF with
   the canvas rendered at the top and a bulleted list of every
@@ -293,6 +351,10 @@ Mode**. Hack Mode is a developer/debug theme — switching to it also adds
 a **Debug menu** (verbose console logging, a live scene-stats readout in
 the status bar, reload stylesheet) and a decorative status-bar widget.
 Harmless to poke at, but not part of the normal painting workflow.
+
+**Help > About Happy Boy Atelier** shows a small identity dialog — app
+name/version and the mission line ("plan the painting before you touch
+the canvas").
 
 ## Upload from Phone
 

@@ -72,3 +72,50 @@ def test_defer_blur_refresh_not_touched_when_drag_completes_normally(qapp):
     assert item._defer_blur_refresh is False
     assert item.blur_amount() == 40
     assert scene.undo_stack.count() == 1
+
+
+# -- Same interrupted-drag family, exercised for the third ("grayscale")
+# field added alongside "blur"/"clarity" — this is the one that actually
+# changed the shared handlers from a two-way if/else to a three-way
+# if/elif/else, the likeliest place for an off-by-one field mixup.
+
+def test_grayscale_drag_interrupted_mid_press_clears_defer_flag(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(50, 50)
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    scene.set_selection([item])
+    panel = PropertiesPanel(scene)
+    panel.refresh()
+
+    panel._on_blur_field_pressed("grayscale")
+    panel.grayscale_slider.setValue(70)
+    assert item._defer_blur_refresh is True
+
+    scene.delete_selected_items()
+    panel.refresh()
+
+    assert item._defer_blur_refresh is False
+    old = item.grayscale_amount()
+    scene.undo_stack.push(SetPropertyCommand(item.set_grayscale_amount, old, 30, "Change value check"))
+    scene.undo_stack.undo()
+    assert item._processed_cache_key[2] == item.grayscale_amount()
+
+
+def test_grayscale_drag_completes_normally_pushes_one_undo_step(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(50, 50)
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    scene.set_selection([item])
+    panel = PropertiesPanel(scene)
+    panel.refresh()
+
+    panel._on_blur_field_pressed("grayscale")
+    panel.grayscale_slider.setValue(80)
+    panel._on_blur_field_released("grayscale")
+
+    assert item._defer_blur_refresh is False
+    assert item.grayscale_amount() == 80
+    assert scene.undo_stack.count() == 1
+
+    scene.undo_stack.undo()
+    assert item.grayscale_amount() == 0.0

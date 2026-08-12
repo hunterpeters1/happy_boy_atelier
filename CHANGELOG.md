@@ -1,5 +1,95 @@
 # Changelog
 
+## Unreleased — UI upgrade ("A Unique Instrument, Not a PureRef Clone")
+
+A second design pass, informed by studying PureRef/Milanote/etc. for what
+makes each of *their* UIs distinctive, then deliberately not copying
+either — deepening the existing brass/graphite instrument-panel identity
+and finishing several pieces the prior UX redesign explicitly cut for
+scope. See `V2_ROADMAP.md`'s Section 7 and `ARCHITECTURE.md` for the full
+design rationale. Landed in phases.
+
+### Phase 1 (lowest-risk, highest-identity-payoff — nothing touches undo/serialization)
+- **Rule of Thirds / Golden Ratio intersection snapping** — dragging a
+  reference image now also snaps to a guide intersection while that guide
+  is turned on, alongside the existing canvas-center/other-image-center
+  snapping (`ReferenceImageItem._snap_position()`).
+- **Hover-reveal Project Panel row icons** — item rows' eye/lock icons
+  now rest dim and rise to full opacity on hover, via the same fade
+  `app/scrollbars.py` already uses for scrollbar handles
+  (`app/panels/row_hover.py`). A row whose lock/visibility was actually
+  toggled away from its default stays legible even at rest.
+- **Focus Mode** ("Clear the Bench," View menu, Ctrl+Shift+F) — hides the
+  toolbar and every dock so only the canvas remains; restores each
+  panel's exact prior visibility on exit.
+- **Two hardware motifs**: hairline corner rivets on the canvas rect and
+  every dock's title bar (`app/panels/dock_title_bar.py`), and
+  print-production-style trim marks plus a live physical-dimension
+  readout on the canvas corners (`CanvasView.drawForeground()`).
+
+### Phase 2 (mission-critical content features — the two items `V2_ROADMAP.md` itself called out as highest-fit-and-not-yet-started)
+- **On-canvas measurement tool** — a ruler-and-protractor composition
+  marker (`MeasurementItem`, Project Panel's Composition section): place
+  via click-drag-click like a movement line, reporting live length (in
+  the canvas's own unit) and angle from horizontal. Drag either endpoint
+  independently afterward; hold Shift to snap the angle to 15° increments.
+  Persists, undoes, and exports like any other composition marker.
+  Endpoint dragging is now shared infrastructure (`TwoPointHandle`,
+  `app/canvas/point_handle.py`) — `DirectionArrowItem` (lighting layer)
+  was refactored onto the same class instead of keeping its own copy.
+- **Value Check** — a third Study Blur–family slider
+  (`ReferenceImageItem.grayscale_amount()`) that non-destructively
+  desaturates a reference image, for judging value relationships without
+  color as a distraction; composes with Blur/Line Clarity in one pass.
+  **Edit > Toggle Value Check (All References)** flips every visible,
+  unlocked reference image at once as one undo step — "squint at the
+  whole board," not just one photo.
+
+### Phase 3 (remaining structural/interaction work)
+- **Floating selection context toolbar** — selecting exactly one item
+  shows a small toolbar (Duplicate/Flip Horizontal/Lock/Delete) just
+  below it (`app/canvas/context_toolbar.py`), cutting the eye-travel to
+  a dock for the most common single-item actions. Hides during multi-
+  select and while actively dragging the item.
+- **Contact-sheet thumbnails** — reference-image rows in the Project
+  Panel show a small square crop of the actual photo instead of a
+  generic glyph (`_reference_thumbnail_icon()`).
+- **Drag-to-reorder** — reference/composition/lighting rows can now be
+  dragged to a new position within their own layer section, not just
+  moved via the up/down/to-back/to-front buttons (`_ReorderableTree`,
+  `MoveItemToIndexCommand`). A drag can't cross into a different layer's
+  section.
+- **True edge-to-edge snapping** — dragging a reference image now also
+  snaps its own edge flush against the canvas bounds or another visible
+  image's edge, not just center-to-center (`ReferenceImageItem.
+  _half_extent()`, extending `_snap_position()`).
+
+### Phase 4 (pulled-forward studio features, per `V2_ROADMAP.md`'s own deferred-pending-real-use list)
+- **Reference library** — a new dock (`app/panels/library_panel.py`,
+  tabified with the Project Panel) holding a personal, cross-project
+  collection of reference images (`app/library.py`), stored outside any
+  `.atelier` file or undo stack — explicitly not project/scene state, the
+  same boundary Recent Files already sits on. Import via a file picker or
+  drag-and-drop; drag a thumbnail onto the canvas to place it, routed
+  through the exact same drop path OS file drag-and-drop already used, so
+  it's an ordinary undoable `AddItemCommand` with no new placement logic.
+- **Batch export presets** — the Export panel (`app/dialogs/
+  export_dialog.py`) gains a Preset combo to save/recall a named
+  `{format, DPI, include Study Blur}` combo, for exporting a batch of
+  paintings the same way repeatedly. Never stores the destination path,
+  which stays per-export by design.
+- **Project templates** — "New Painting" gains a My Templates list
+  seeded from `MainWindow.save_as_template()` (File menu), each entry a
+  named `{width, height, unit, guide toggles}` starting point saved from
+  an existing project's current canvas format — deliberately never
+  reference images or composition/lighting content, since auto-populating
+  those would cross into "software infers the composition." Picking a
+  plain size preset afterward clears any staged template guides back out.
+- **About dialog** (`app/dialogs/about_dialog.py`, Help menu) — a proper
+  styled identity screen (app icon, name/version, the "plan the painting
+  before you touch the canvas" mission line, credits) replacing the old
+  plain `QMessageBox.about()` call.
+
 ## Unreleased — UX redesign ("Studio, Not Software")
 
 A ground-up interaction and visual-design pass, driven by a full-source

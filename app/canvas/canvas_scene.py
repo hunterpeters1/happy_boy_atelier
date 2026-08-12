@@ -5,7 +5,7 @@ full layer stack.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QLineF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QLineF, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPen, QTransform, QUndoStack
 from PySide6.QtWidgets import QGraphicsScene
 
@@ -14,16 +14,21 @@ from ..constants import LayerKind
 from ..project import CanvasSpec
 from .interactive_item import InteractiveItem
 from ..layers.reference_layer import ReferenceImageItem, ReferenceLayerGroup
-from ..layers.composition_layer import CompositionLayerGroup, FocalPointItem, MovementLineItem, NoteItem
+from ..layers.composition_layer import (
+    CompositionLayerGroup, FocalPointItem, MeasurementItem, MovementLineItem, NoteItem,
+)
 from ..layers.perspective_layer import PerspectiveLayerGroup
 from ..layers.lighting_layer import LightingLayerGroup, LightSourceItem, DirectionArrowItem
 from ..layers.guide_overlay import GuidesLayerGroup
-from .undo_commands import AddItemCommand, CopyItemCommand, DeleteItemCommand, SendToBackCommand, BringToFrontCommand
+from .undo_commands import (
+    AddItemCommand, CopyItemCommand, DeleteItemCommand, SendToBackCommand, BringToFrontCommand,
+    SetPropertyCommand,
+)
 
 # tools that place a single item on one click
 _SINGLE_CLICK_TOOLS = {"focal_primary", "focal_secondary", "note_comp", "light_source", "note_light"}
 # tools that need a start-click then an end-click
-_TWO_CLICK_TOOLS = {"movement_line", "light_arrow", "shadow_arrow"}
+_TWO_CLICK_TOOLS = {"movement_line", "light_arrow", "shadow_arrow", "measure"}
 
 
 class CanvasScene(QGraphicsScene):
@@ -191,6 +196,26 @@ class CanvasScene(QGraphicsScene):
         painter.setBrush(QBrush(QColor(C.COLOR_CANVAS)))
         painter.setPen(QPen(QColor(C.COLOR_CANVAS_EDGE), 2))
         painter.drawRect(self._canvas_rect)
+        self._draw_corner_rivets(painter)
+
+    def _draw_corner_rivets(self, painter) -> None:
+        """Four small filled marks just inside each canvas corner —
+        "rivets holding the panel plate together," reinforcing the
+        machined-instrument identity theme.py's docstring describes.
+        Structural hardware, not an interactive accent, so deliberately
+        COLOR_LINE rather than brass.
+        """
+        inset = 10.0
+        r = self._canvas_rect
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(C.COLOR_LINE)))
+        for corner in (
+            QPointF(r.left() + inset, r.top() + inset),
+            QPointF(r.right() - inset, r.top() + inset),
+            QPointF(r.left() + inset, r.bottom() - inset),
+            QPointF(r.right() - inset, r.bottom() - inset),
+        ):
+            painter.drawEllipse(corner, C.RIVET_RADIUS_PX, C.RIVET_RADIUS_PX)
 
     def set_bg_color(self, color: str) -> None:
         """Update the desk color behind the canvas rect. Updates the
@@ -419,6 +444,9 @@ class CanvasScene(QGraphicsScene):
             elif tool == "shadow_arrow":
                 item = DirectionArrowItem("shadow", start, pos)
                 self._add(self.lighting_layer, item, "Add shadow direction")
+            elif tool == "measure":
+                item = MeasurementItem(start, pos)
+                self._add(self.composition_layer, item, "Add measurement")
             self.set_active_tool(None)
             self.tool_finished.emit()
             return True
@@ -515,6 +543,7 @@ class CanvasScene(QGraphicsScene):
             clone.set_locked(item.is_locked())
             clone.set_blur_amount(item.blur_amount())
             clone.set_line_clarity(item.line_clarity())
+            clone.set_grayscale_amount(item.grayscale_amount())
             return clone
         return None
 
@@ -526,6 +555,36 @@ class CanvasScene(QGraphicsScene):
             if hasattr(layer, "all_items") and item in layer.all_items():
                 return layer
         return None
+
+    def toggle_grayscale_all(self) -> None:
+        """One-click "squint the whole board" Value Check: if a majority
+        of the currently visible+unlocked reference images already have
+        grayscale_amount() > 0, turns it off for all of them; otherwise
+        turns it on (full desaturate) for all of them. A macro over the
+        same per-item SetPropertyCommand the Properties panel's own Value
+        Check slider already pushes — no second, scene-wide flag is
+        stored anywhere; "is the layer grayscale" is derived from actual
+        per-item state each time this is called, not shadowed.
+        """
+        images = [item for item in self.reference_layer.items() if item.isVisible() and not item.is_locked()]
+        if not images:
+            return
+        mostly_on = sum(1 for item in images if item.grayscale_amount() > 0) >= len(images) / 2
+        target = 0.0 if mostly_on else 100.0
+        changed = [item for item in images if item.grayscale_amount() != target]
+        if not changed:
+            return
+        multi = len(changed) > 1
+        if multi:
+            self.undo_stack.beginMacro("Toggle Value Check (All)")
+        try:
+            for item in changed:
+                self.undo_stack.push(SetPropertyCommand(
+                    item.set_grayscale_amount, item.grayscale_amount(), target, "Toggle Value Check"
+                ))
+        finally:
+            if multi:
+                self.undo_stack.endMacro()
 
     def send_to_back_selected(self) -> None:
         items = self.selected_items()

@@ -44,17 +44,25 @@ happy_boy_atelier/
       selection.py               select_on_left_click() — routes clicks into CanvasScene's selection API
       undo_commands.py          QUndoCommand classes (content mutations only — see Undo/redo below)
       handle_frame.py           reusable interactive transform box (move/scale/rotate handles)
+      point_handle.py            TwoPointHandle: shared draggable endpoint handle for two-point
+                                 markers (DirectionArrowItem, MeasurementItem)
+      context_toolbar.py         SelectionContextToolbar: floating single-item action toolbar
+                                 (Duplicate/Flip/Lock/Delete), a CanvasView.viewport() child widget
       resize_math.py            corner-drag resize math (anchor/rotation-aware)
     layers/
       reference_layer.py        ReferenceImageItem + ReferenceLayerGroup (import, crop, opacity, lock,
                                  rotation/position snapping)
-      composition_layer.py      FocalPointItem, MovementLineItem, NoteItem
+      composition_layer.py      FocalPointItem, MovementLineItem, MeasurementItem, NoteItem
       perspective_layer.py      HorizonLineItem, VanishingPointItem, PerspectiveGridItem (1/2/3-pt)
       lighting_layer.py         LightSourceItem, DirectionArrowItem, NoteItem (reused)
       guide_overlay.py          RuleOfThirdsOverlay, GoldenRatioOverlay (non-interactive, top z-order)
     panels/
       layers_panel.py           Project Panel dock: one outliner (every placed item, not just
                                  references), search filter, tool-activation buttons, perspective settings
+      row_hover.py               hover-reveal for Project Panel item-row icons (fades _RowButtons
+                                 via app/scrollbars.OpacityFade, not a QStyledItemDelegate)
+      dock_title_bar.py          custom QDockWidget title bar — same look as the QSS default, plus a
+                                 pair of corner rivets (see Icons/visual-language section below)
       properties_panel.py       Inspector dock: contextual single-item editor + multi-select batch edit
     dialogs/
       new_project_dialog.py     one always-editable W/H/unit picker + orientation-filtered presets
@@ -195,11 +203,41 @@ scale; dragging the rotate handle updates rotation around the item's
 center, snapping to 15° increments while Shift is held. This keeps
 "arrange references" feeling precise rather than fiddly. A plain body
 drag (not a handle drag) also snaps the image's center to the canvas
-center or to another visible reference image's center, within a
+center, to another visible reference image's center, or — only while the
+corresponding guide is actually turned on — to a Rule of Thirds/Golden
+Ratio intersection (`ReferenceImageItem._snap_position()` in
+`app/layers/reference_layer.py`; the intersection fractions are read
+straight off `GuidesLayerGroup.thirds`/`.golden`, not recomputed
+separately, so the two can't drift apart). All of this is within a
 zoom-independent catch radius — bypassed by holding Alt/Option, and
 guarded so it only applies during an actual interactive drag, never to a
 programmatic `setPos()` from undo/redo, batch align, or the Inspector's
 position fields.
+
+## Two-point markers: the shared endpoint handle
+
+`DirectionArrowItem` (`app/layers/lighting_layer.py`) and `MeasurementItem`
+(`app/layers/composition_layer.py`, the on-canvas ruler/angle tool) are
+both two-endpoint markers whose endpoints drag independently after
+placement, via small square handles — `TwoPointHandle`
+(`app/canvas/point_handle.py`). Extracted to that shared location (not
+either layer module) specifically because composition_layer.py and
+lighting_layer.py already have a one-way import relationship (lighting
+imports `NoteItem` from composition), so a handle class defined in either
+layer module couldn't be reached from the other without a cycle. `owner`
+just needs to expose `points()`/`set_point(which, local)`/
+`set_points(points)`/`color()`; the handle owns press/move/release, and
+release pushes exactly one `SetPropertyCommand(owner.set_points, old, new,
+label)` if anything actually changed. `MeasurementItem.set_point()` adds
+one thing `DirectionArrowItem` doesn't: while Shift is held, the dragged
+endpoint's angle around the *other* endpoint snaps to the nearest
+`ROTATION_SNAP_DEG` (`_snap_to_angle()`, same round-to-nearest pattern
+`reference_layer.py`'s rotate-handle snap already uses, applied to an
+endpoint-around-a-pivot instead of a whole-image rotation). A
+`MeasurementItem`'s length/angle label is never stored — `display_label()`
+computes it fresh from the two points every time, in the canvas's own
+display unit (`CanvasSpec.unit`), so there's no shadow value that could
+drift from the geometry.
 
 ## Modes
 
@@ -208,6 +246,15 @@ position fields.
   (`ItemIsMovable`/`ItemIsSelectable` cleared everywhere); a status-bar
   banner and toolbar toggle make the state unmistakable. Unlock requires an
   explicit action (no accidental edits).
+- **Focus Mode** (`MainWindow.toggle_focus_mode()`, View menu,
+  Ctrl+Shift+F): a UI-chrome-only toggle, not a `Project`/undo-stack
+  state — hides the toolbar and every dock so only the canvas and menu
+  bar remain, then restores each dock's exact prior visibility on exit
+  (not a blanket re-show, since Properties/Swatches are tabified and only
+  one may have been the visible/active tab going in). The structural
+  lesson taken from PureRef's canvas-first identity without adopting its
+  chrome-less floating-window model, which doesn't fit this app's docked,
+  project-based shape.
 
 Projector mode (a separate fullscreen tracing-aid window) existed here
 through the UX redesign below but has been removed entirely, along with
@@ -272,6 +319,168 @@ meant to hold per the file-structure comment below, but which was never
 actually built — that folder holds only the window/taskbar icon
 (`app.ico`/`app.png`).
 
+## Hover-reveal row icons (`app/panels/row_hover.py`)
+
+The Project Panel's item-row eye/lock (and, where present, reorder)
+buttons rest at a dim opacity and rise to full opacity only while the
+pointer is over that row — previously always fully visible, which read as
+UI clutter across a painting with many placed items. `layers_panel.py`'s
+own docstring long assumed this needed a custom `QStyledItemDelegate`
+rewrite; it doesn't. `_RowButtons` is already a persistent `QWidget`
+embedded per row via `setItemWidget()`, so it can be faded with the exact
+`OpacityFade` class `app/scrollbars.py` already uses for scrollbar
+handles (same 150ms fade / 500ms hide-delay timing, reused not
+reinvented — both symbols were promoted from that module's own
+underscore-private names to public ones specifically so this second
+consumer could import them without duplicating the animation
+bookkeeping). `row_hover.py` is a thin `QObject` event filter on the
+tree's viewport that tells whichever row's `_RowButtons` is under the
+cursor to reveal itself and the previously-hovered one to rest back down;
+`_RowButtons` itself owns `is_default_state()`/`set_row_hovered()` and
+keeps a non-default row (one whose lock/visibility was actually toggled
+away from the default) at a near-full rest opacity rather than fading it
+to near-invisible — losing the only visual cue that an item is
+locked/hidden until you happen to hover it would be a regression, not
+polish. Layer-header rows are never marked `hoverable` and stay
+full-opacity structural navigation, not per-item detail.
+
+## Contact-sheet thumbnails (`_reference_thumbnail_icon()` in `layers_panel.py`)
+
+Reference-image rows show a small square crop of the actual photo instead
+of the generic "image" glyph every other marker type still uses — the
+outliner reads closer to a photographer's contact sheet than a generic
+file tree. Built from the same downscaled proxy `paint()` already reads
+(`ReferenceImageItem._get_display_pixmap()`) — no extra render. The
+proxy's own crop sub-rect is copied out, scaled with
+`Qt.KeepAspectRatioByExpanding`, then center-cropped to an exact square;
+plain scale-to-fit would visibly distort a non-square photo. Recomputed
+on every `refresh_structure()` rebuild rather than cached separately —
+that's already a full tree rebuild on any relevant change, so a second
+cache-invalidation path isn't worth adding.
+
+## Drag-to-reorder (`_ReorderableTree` in `layers_panel.py`)
+
+`StackedLayerMixin` plus `ReorderItemCommand`/`SendToBackCommand`/
+`BringToFrontCommand` already gave every reorderable layer group real
+forward/backward/to-back/to-front operations, wired to `_RowButtons`'
+arrow buttons — the only missing piece was the drag *gesture* itself.
+`_ReorderableTree` (a small `QTreeWidget` subclass used in place of a
+plain one) enables Qt's `InternalMove` drag/drop mode for the gesture,
+drop-indicator line, and accept/reject cursor only — its `dropEvent()`
+override never lets Qt actually move a `QTreeWidgetItem`; doing so would
+make the tree's own item order a second source of truth alongside each
+layer group's bucket list. Instead it computes the target bucket index
+(`LayersPanel._handle_reorder_drop()`) and pushes one new
+`MoveItemToIndexCommand` (`app/canvas/undo_commands.py`, same
+capture-on-redo/restore-on-undo shape as `SendToBackCommand`), then lets
+the resulting `refresh_structure()` (already wired to
+`undo_stack.indexChanged`) redraw the tree from the corrected model —
+so the two can never drift apart. Item rows list top-to-bottom in *print*
+order (top row = prints on top), the layer group's own bucket order
+*reversed* (see `layers_panel.py`'s own module docstring), so
+`_handle_reorder_drop()` computes the desired final top-to-bottom row
+order directly from the current rows and reverses it back for the target
+index, rather than doing delta arithmetic across the two orderings.
+Rejects: dropping on empty space, on a different layer section
+(`source_row.parent() is not target_row.parent()` — this single check
+also transparently rejects drops on header/separator rows, which are
+always top-level with `parent() is None`), or a non-linear `OnItem`/
+`OnViewport` drop indicator. Only genuinely reorderable rows
+(`_add_item_row()` called with a real `group`) keep
+`Qt.ItemIsDragEnabled`/`ItemIsDropEnabled` — every other row (headers,
+separators, tool/toggle/settings rows, and perspective's non-reorderable
+horizon/vanishing-point item rows) has both cleared, since
+`QTreeWidgetItem`'s own default flags make every row drag/drop-capable
+otherwise.
+
+## Floating selection context toolbar (`app/canvas/context_toolbar.py`)
+
+`SelectionContextToolbar` is a small `QWidget` parented to
+`CanvasView.viewport()` (not a top-level window, so no OS floating-window
+quirks) showing Duplicate/Flip Horizontal/Lock/Delete for whichever
+single item is currently selected, positioned just below its
+`sceneBoundingRect()` — below, not above, so it never collides with
+`HandleFrame`'s rotate handle. Driven by `CanvasScene.selection_changed`;
+deliberately scoped to exactly one selected item (multi-select already
+has the Properties panel's Batch Edit section for bulk actions, so this
+widget's job is purely cutting eye-travel for the common single-selection
+case). Every button calls the exact same method the right-click context
+menu or Edit menu already calls (`item.flip_horizontal()`,
+`scene.duplicate_selected_items()`, `scene.delete_selected_items()`,
+`item.set_locked()`) — an additional low-travel trigger surface, not new
+action logic, so undo/redo behaves identically regardless of which
+surface was used. Repositions on `zoom_changed` and both scrollbars'
+`valueChanged` (pan) so it tracks the selection through any view
+transform change, not just a selection change. `CanvasView.
+mousePressEvent()`/`mouseReleaseEvent()` call `set_suspended(True)`/
+`(False)` around every canvas press — a body drag can move the selected
+item right through where the toolbar is sitting, and it must never steal
+a press meant for the item/canvas underneath it; presses on the
+toolbar's own buttons never reach `CanvasView` at all, since they're
+delivered to the toolbar's child widgets directly. Styled with the
+existing `role="compact"` `QToolButton` QSS (hairline border, brass
+hover/checked) rather than a new widget style. Locking the selected item
+deselects it (`InteractiveItem.set_locked()`'s existing behavior — a
+locked item isn't interactively selectable), so clicking Lock here
+correctly makes the toolbar disappear along with the item's selection;
+that's the intended consequence of existing lock semantics, not a bug
+this widget needs to work around.
+
+## Hardware motifs: rivets and trim marks
+
+Two small `QPainter`-level additions, both reusing painters/pens/fonts
+already set up at their call sites (no new assets, no gradients, no
+rounded shapes, matching this file's "machined panel plate" rule):
+
+- **Corner rivets** — `CanvasScene._draw_corner_rivets()` paints four
+  small filled `C.COLOR_LINE` marks just inside each canvas corner
+  (`drawBackground()`), and `app/panels/dock_title_bar.py`'s
+  `DockTitleBar` (set via `QDockWidget.setTitleBarWidget()`, replacing
+  the QSS-only default title bar for the Project/Properties/Swatches
+  docks) paints the same pair at its own left/right edges in its
+  `paintEvent()`. Deliberately neutral-line-colored, not brass — rivets
+  read as structural hardware, not an interactive accent. `C.RIVET_RADIUS_PX`
+  is the one shared size constant between the two call sites.
+- **Trim marks + dimension callout** — `CanvasView.drawForeground()`
+  (the same view-space painter already drawing the brass ruler ticks)
+  gains short L-shaped crop-mark ticks just outside each canvas corner
+  (`_draw_trim_marks()`, the actual print-production/technical-drawing
+  trim-mark convention) plus a monospace readout of the canvas's real
+  physical dimensions in the artist's chosen unit near the bottom-right
+  corner (`_draw_dimension_callout()`, reading `CanvasSpec.width`/
+  `.height`/`.unit` directly — those are already in the artist's chosen
+  unit, no conversion needed). Turns the canvas from "a rectangle" into a
+  labeled technical artifact — the app's ownable identity marker, since
+  neither PureRef's chrome-less canvas nor Milanote's card-based one
+  frames its content this way.
+
+## Value Check (`app/canvas/study_blur.py`, `app/layers/reference_layer.py`)
+
+A non-destructive per-image desaturate, extending the Study Blur family
+(Blur/Line Clarity) with a third slider rather than a parallel mechanism:
+`apply_study_effect()` gained a `grayscale_pct` parameter, applied
+*before* blur/clarity so a squint-test and a value-check compose in one
+pass sharing one processed-pixmap cache (`ReferenceImageItem.
+_processed_cache_key` is now `(blur, clarity, grayscale, crop)` — note the
+index shift this caused in `_get_processed_display_pixmap()`'s own
+crop-changed check). `ReferenceImageItem.grayscale_amount()`/
+`set_grayscale_amount()` mirror `blur_amount()`/`set_blur_amount()`
+exactly, including reuse of the same `set_defer_blur_refresh()` flag
+during an active Properties-panel slider drag — one deferred-recompute
+flag already covers "any of the three sliders is mid-drag." Serialized as
+a `"grayscale"` key on reference entries, defaulting to `0.0` for every
+pre-existing `.atelier` file; exported only when the artist opts in via
+the Export dialog's existing "Include Study Blur effect" checkbox
+(`export_study_effect`) — no second export flag.
+
+`CanvasScene.toggle_grayscale_all()` (Edit menu: "Toggle Value Check (All
+References)") is a macro over the same per-item `SetPropertyCommand` the
+Properties panel's slider already pushes, one command per visible+
+unlocked reference image — there is deliberately no second, scene-wide
+boolean anywhere; "is the layer grayscale" is derived from actual
+per-item state (majority already on → turn all off, else turn all on)
+each time the action runs, not shadowed.
+
 ## Export
 
 - PNG/JPG: render the scene rect at a chosen output DPI via
@@ -284,6 +493,59 @@ actually built — that folder holds only the window/taskbar icon
   pre-filled from the project name and (if saved before) its folder,
   recomputes live as the format radio changes, and is sanitized against
   filesystem-illegal characters.
+- **Presets** — a named `{format, dpi, include_study_effect}` combo,
+  recalled via a combo box beside the format radios. Deliberately never
+  stores the destination, which is per-export by nature (a preset reused
+  on a different painting shouldn't silently point at the last painting's
+  folder). Serialized as a JSON string under one `QSettings` key
+  (`_PRESETS_SETTINGS_KEY = "exportPresets"`) rather than relying on
+  `QSettings`' own dict/bool marshalling, which isn't guaranteed to
+  round-trip identically across every backend (registry/plist/INI).
+
+## Reference library (`app/library.py`, `app/panels/library_panel.py`)
+
+A personal, cross-project asset collection — explicitly **not** part of
+any project's scene or `.atelier` file, so it can't become shadow project
+state (same boundary Recent Files already sits on). `library.py` stores a
+flat folder of copied-in images plus per-item thumbnails under
+`QStandardPaths.AppDataLocation`, the same location pattern
+`app/recovery.py` already uses. `LibraryPanel` is a `QDockWidget`,
+constructed once in `MainWindow.__init__` (unlike the Project/Properties/
+Swatches docks, which are rebuilt fresh on every `_new_project()` via
+`_rebuild_workspace()`) and tabified with the Project Panel dock each time
+a new one is built. Dragging a thumbnail out carries a real
+`QUrl.fromLocalFile()` (`_LibraryList.mimeData()`), which `CanvasView`'s
+existing OS drag-and-drop handler already accepts unmodified — placing a
+library image is an ordinary `AddItemCommand`-backed import, not a new
+undo path. Double-clicking a thumbnail does the same import via
+`LibraryPanel.import_requested`, connected straight to
+`MainWindow._import_image_paths()`.
+
+## Project templates (`app/project_templates.py`)
+
+A named `{width, height, unit, guides}` starting point for New Painting —
+explicitly *not* reference images or composition/lighting content, since
+auto-populating those would cross into "software infers the composition,"
+out of scope by design. Saved via `MainWindow.save_as_template()` (File
+menu) from the current project's `CanvasSpec` and
+`GuidesLayerGroup.to_dict()`; applied via `NewProjectDialog`'s My
+Templates list, which calls `_apply_template()` to fill width/height/unit
+and stage the guides dict, returned by `selected_template_guides()` and
+passed through to `MainWindow._new_project(spec, guides)`, which applies
+it via `GuidesLayerGroup.load_from_dict()` after scene construction.
+Picking a plain size preset afterward clears the staged guides back to
+`None` — a template's guides shouldn't silently leak onto an unrelated
+format choice. Same JSON-string-in-`QSettings` storage as export presets.
+
+## About dialog (`app/dialogs/about_dialog.py`)
+
+A `QDialog` styled entirely via `theme.py`'s existing global `QDialog`
+rule (no bespoke stylesheet), replacing the previous plain
+`QMessageBox.about()` call from `MainWindow._show_about()` (Help menu).
+Shows the app icon (`resources.app_icon_path()`), name/version from
+`constants.py`, the mission line, and credits — a pre-`MainWindow` launch
+splash screen was explicitly scoped out as real added complexity for a
+fast-starting desktop app.
 
 ## Current scope
 
@@ -293,9 +555,11 @@ composition guides → perspective grids → lighting notes → save/reopen
 now also covers: undo/redo, crash recovery, a real outliner-based
 Project Panel, a unified selection model, an Inspector with editable
 vanishing-point/horizon coordinates and multi-select batch editing, a
-single-panel export flow, a command palette, OS drag-and-drop import,
-live two-click-tool previews, rotation/position snapping, right-click
-context menus, and recent files with thumbnails. See `CHANGELOG.md` for
-the itemized history. Still explicitly excluded per spec: AI generation,
-brush/paint tools, cloud accounts, social/marketplace features. See
-`V2_ROADMAP.md` for what's actually still ahead.
+single-panel export flow with batch presets, a command palette, OS
+drag-and-drop import, a cross-project reference library, project
+templates, live two-click-tool previews, rotation/position/edge
+snapping, right-click context menus, recent files with thumbnails, and a
+proper About dialog. See `CHANGELOG.md` for the itemized history. Still
+explicitly excluded per spec: AI generation, brush/paint tools, cloud
+accounts, social/marketplace features. See `V2_ROADMAP.md` for what's
+actually still ahead.

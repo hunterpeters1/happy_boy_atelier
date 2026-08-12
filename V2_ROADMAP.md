@@ -219,15 +219,18 @@ removed from the app entirely, not just left unstarted.
 - ⬜ Corner-pin/keystone correction for off-axis projectors
 - ⬜ Multi-monitor target selection for fullscreen
 
-### Phase 4 — Studio Features — ⬜ not started
+### Phase 4 — Studio Features — 🟨 mostly done, see Section 7
 *Evaluate after Phases 0–2 land and get used for real. Flagged explicitly
 because these are the features most likely to either earn their keep or
-turn into scope creep — see Section 5.* Phases 0 and (mostly) 1 have now
-landed and been used for real; this phase is worth actually revisiting.
+turn into scope creep — see Section 5.* Phases 0–3 have now landed and
+been used for real; this phase was re-proposed and mostly landed, per the
+UI upgrade plan's own Section D.
 
-- ⬜ Project templates (save canvas + guide setup as a reusable starting
-  point)
-- ⬜ Color eyedropper / swatch reference from imported photos
+- ✅ Project templates (save canvas + guide setup as a reusable starting
+  point) — `app/project_templates.py`, `MainWindow.save_as_template()`
+- ✅ Color eyedropper / swatch reference from imported photos — shipped
+  earlier than this document tracked (README's Eyedropper + Swatches
+  dock)
 - ⬜ Multiple open projects (tabs) — **high complexity, changes the app's
   mental model from "one project, one window."** Not recommended without
   explicit sign-off; current workaround (launch the app again) may simply
@@ -290,8 +293,11 @@ landed and been used for real; this phase is worth actually revisiting.
 6. **Any branding/identity work** (splash screen, credits, a proper name
    for the "recent projects" screen, etc.) you want folded into Phase 1's
    UI polish while that work is already happening? — the naming half
-   shipped ("Start Screen"); splash screen/credits are still open if
-   wanted.
+   shipped ("Start Screen"); a proper About dialog (app icon, name/
+   version, mission line, credits — Help menu) has since shipped too. A
+   pre-launch splash screen is still open, and was deliberately scoped
+   out again in the UI upgrade plan as real added complexity for a
+   fast-starting desktop app.
 
 ---
 
@@ -313,9 +319,9 @@ never stuck for children of these `QGraphicsItemGroup` layers).
   edge (not just center-to-center) reference-image snapping
 - Reference-image memory footprint / proxy-resolution strategy (Section
   1, Section 5 item 2) — still genuinely unvalidated
-- Templates, color eyedropper, multiple open projects/tabs (Phase 4) —
-  still gated on Section 6 items 4–5; worth actually re-proposing now
-  that Phases 0–1 are in real use, per this doc's own original plan
+- Multiple open projects/tabs (Phase 4) — still gated on Section 6 item
+  5; templates and the color eyedropper have since shipped (see Section
+  7's Phase 4 status above)
 - Installer vs. portable exe (Section 6 item 2) — still open, and more
   pointed now that the build path is a manual command sequence by firm
   policy rather than a placeholder
@@ -332,21 +338,23 @@ phase's own commit — not an oversight — kept here so they aren't lost:
   Needs a custom `QTreeWidget` item delegate; the icons are small and
   always-visible instead for now, which is a reasonable permanent state
   too if hover-reveal turns out not to be worth the delegate complexity.
-- **A cross-project reference library.** Right now every imported image
-  lives and dies inside one project's `.atelier` zip. A personal,
-  taggable collection independent of any one painting — drag into any
-  open project — would turn reference-gathering into an ongoing
-  practice instead of a per-painting chore, and is a natural complement
-  to the recent-files work in Phase 7.
+- **A cross-project reference library.** — ✅ done
+  (`app/library.py`, `app/panels/library_panel.py`): a personal
+  collection independent of any one painting, drag-or-double-click into
+  the current project, turning reference-gathering into an ongoing
+  practice instead of a per-painting chore.
 - **Folder-based sync** (point the app at a Dropbox/Drive/NAS folder,
   treat `.atelier` files there like any other project) as a "work across
   two machines" answer that doesn't compromise the "no cloud accounts"
   design commitment, since there's no account or server involved — just
   a folder the artist already trusts.
-- **Batch export presets** (save a named format/DPI/notes-on-off
-  configuration, reuse it across paintings) and a **bundled "critique
-  pack" export** (canvas render + planning notes, zipped for sending to
-  a mentor without handing over the live editable project).
+- **Batch export presets** — ✅ done (`app/dialogs/export_dialog.py`'s
+  Preset combo: save a named format/DPI/Study-Blur configuration, reuse
+  it across paintings). A **bundled "critique pack" export** (canvas
+  render + planning notes, zipped for sending to a mentor without handing
+  over the live editable project) is still open — a preset can get you
+  most of the way there today, but there's no separate zip-bundle export
+  format.
 
 ### A concrete next phase, if picking one
 Given what's already landed, the highest-leverage next slice is probably
