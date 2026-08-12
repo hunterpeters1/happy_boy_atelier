@@ -2,6 +2,9 @@
 full opacity on command, but a row whose lock/visibility has been toggled
 away from its default must stay legible (not fade to near-invisible) even
 at rest — see _RowButtons' docstring in app/panels/layers_panel.py.
+
+Also covers the contact-sheet thumbnail icons reference-image rows use in
+place of the generic "image" glyph (_reference_thumbnail_icon()).
 """
 
 from __future__ import annotations
@@ -11,11 +14,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QPointF, QSize
+from PySide6.QtGui import QColor, QPixmap
 
 from app.canvas.canvas_scene import CanvasScene
-from app.panels.layers_panel import LayersPanel, _RowButtons
+from app.panels.layers_panel import LayersPanel, _ROW_ICON_PX, _RowButtons, _reference_thumbnail_icon
 from app.project import CanvasSpec
 
 
@@ -85,3 +88,61 @@ def test_layer_header_row_buttons_are_not_hoverable(qapp):
     header_buttons = header_row.treeWidget().itemWidget(header_row, 1)
     assert header_buttons.hoverable is False
     assert header_buttons._fade is None
+
+
+# -- contact-sheet thumbnails -------------------------------------------
+
+def test_reference_thumbnail_icon_is_square_regardless_of_source_aspect(qapp):
+    pixmap = QPixmap(300, 150)  # 2:1, non-square source
+    pixmap.fill(QColor(10, 200, 10))
+
+    from app.layers.reference_layer import ReferenceImageItem
+    item = ReferenceImageItem("test-thumb", pixmap, 300, 150)
+
+    icon = _reference_thumbnail_icon(item, _ROW_ICON_PX)
+    pm = icon.pixmap(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
+    assert pm.width() == _ROW_ICON_PX
+    assert pm.height() == _ROW_ICON_PX
+
+
+def test_reference_thumbnail_icon_reflects_actual_pixel_content(qapp):
+    pixmap = QPixmap(60, 60)
+    pixmap.fill(QColor(220, 30, 30))
+
+    from app.layers.reference_layer import ReferenceImageItem
+    item = ReferenceImageItem("test-thumb-2", pixmap, 60, 60)
+
+    icon = _reference_thumbnail_icon(item, _ROW_ICON_PX)
+    pm = icon.pixmap(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
+    center = pm.toImage().pixelColor(_ROW_ICON_PX // 2, _ROW_ICON_PX // 2)
+    assert center.red() > center.green()
+    assert center.red() > center.blue()
+
+
+def test_reference_image_row_gets_a_thumbnail_not_the_generic_glyph(qapp):
+    scene = _scene(qapp)
+    pixmap = QPixmap(80, 80)
+    pixmap.fill(QColor(50, 50, 220))
+    item = scene.reference_layer.add_image(pixmap, 500, 500, QPointF(0, 0))
+    panel = LayersPanel(scene)
+    panel.refresh_structure()
+
+    row = panel._row_for_obj[id(item)]
+    pm = row.icon(0).pixmap(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
+    assert pm.width() == _ROW_ICON_PX
+    center = pm.toImage().pixelColor(_ROW_ICON_PX // 2, _ROW_ICON_PX // 2)
+    assert center.blue() > center.red()  # reflects the blue source photo
+
+
+def test_non_reference_item_row_keeps_its_glyph_icon(qapp):
+    """Composition/perspective/lighting markers aren't photos -- they
+    should keep their existing glyph icon, not go through the thumbnail
+    path at all.
+    """
+    scene = _scene(qapp)
+    item = scene.composition_layer.add_focal_point("primary", QPointF(0, 0))
+    panel = LayersPanel(scene)
+    panel.refresh_structure()
+
+    row = panel._row_for_obj[id(item)]
+    assert not row.icon(0).isNull()

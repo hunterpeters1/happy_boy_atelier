@@ -45,6 +45,25 @@ design rationale. Landed in phases.
   unlocked reference image at once as one undo step — "squint at the
   whole board," not just one photo.
 
+### Phase 3 (remaining structural/interaction work)
+- **Floating selection context toolbar** — selecting exactly one item
+  shows a small toolbar (Duplicate/Flip Horizontal/Lock/Delete) just
+  below it (`app/canvas/context_toolbar.py`), cutting the eye-travel to
+  a dock for the most common single-item actions. Hides during multi-
+  select and while actively dragging the item.
+- **Contact-sheet thumbnails** — reference-image rows in the Project
+  Panel show a small square crop of the actual photo instead of a
+  generic glyph (`_reference_thumbnail_icon()`).
+- **Drag-to-reorder** — reference/composition/lighting rows can now be
+  dragged to a new position within their own layer section, not just
+  moved via the up/down/to-back/to-front buttons (`_ReorderableTree`,
+  `MoveItemToIndexCommand`). A drag can't cross into a different layer's
+  section.
+- **True edge-to-edge snapping** — dragging a reference image now also
+  snaps its own edge flush against the canvas bounds or another visible
+  image's edge, not just center-to-center (`ReferenceImageItem.
+  _half_extent()`, extending `_snap_position()`).
+
 ## Unreleased — UX redesign ("Studio, Not Software")
 
 A ground-up interaction and visual-design pass, driven by a full-source

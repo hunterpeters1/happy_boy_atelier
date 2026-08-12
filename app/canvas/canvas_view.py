@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QGraphicsView, QMenu
 
 from .. import constants as C
 from .. import icons
+from .context_toolbar import SelectionContextToolbar
 
 ZOOM_STEP = 1.15
 MIN_ZOOM = 0.05
@@ -45,6 +46,7 @@ class CanvasView(QGraphicsView):
         self._show_ruler = True
         self.setMouseTracking(True)
         self.setAcceptDrops(True)
+        self._context_toolbar = SelectionContextToolbar(self)
 
     # -- zoom -----------------------------------------------------------
     def current_zoom(self) -> float:
@@ -107,6 +109,14 @@ class CanvasView(QGraphicsView):
             self.setDragMode(QGraphicsView.ScrollHandDrag)
             self._middle_panning = True
             self._refresh_cursor()
+        # Suspend the floating context toolbar for the duration of any
+        # press-drag on the canvas -- a body drag can move the selected
+        # item right through where the toolbar is sitting, and it must
+        # never steal a press meant for the item/canvas underneath it.
+        # Only reaches here for presses on the viewport itself, never for
+        # a click on the toolbar's own buttons (those are a child widget
+        # Qt routes to directly).
+        self._context_toolbar.set_suspended(True)
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -115,6 +125,7 @@ class CanvasView(QGraphicsView):
             self._middle_panning = False
             self.setDragMode(QGraphicsView.RubberBandDrag if not self._space_panning else QGraphicsView.ScrollHandDrag)
             self._refresh_cursor()
+        self._context_toolbar.set_suspended(False)
 
     # -- tool-armed cursor --------------------------------------------------
     def set_tool_armed(self, armed: bool) -> None:

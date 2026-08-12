@@ -76,6 +76,9 @@ _SHAPES: dict[str, str] = {
     # "light/dark split" via outline only, no fill, matching every other
     # glyph's single-stroke-weight rule (no half-filled shape here).
     "contrast": '<circle cx="10" cy="10" r="7"/><path d="M10 3v14"/>',
+    # Flip Horizontal: a mirror axis with two chevrons pointing outward
+    # from it -- the standard flip/mirror pictogram, stroke-only.
+    "flip": '<path d="M10 3v14"/><path d="M6 6 3 10l3 4M14 6l3 4-3 4"/>',
 }
 
 

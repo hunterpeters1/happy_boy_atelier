@@ -843,13 +843,31 @@ class ReferenceImageItem(InteractiveItem):
             return self._snap_position(value)
         return super().itemChange(change, value)
 
+    def _half_extent(self) -> tuple[float, float]:
+        """This item's own on-canvas half-width/half-height, ignoring
+        rotation — used only by the edge-to-edge snap candidates below.
+        Explicit, stated simplification (not a bug): a rotated image's
+        true screen-space bounding edges aren't axis-aligned at all, and
+        this codebase already treats the unrotated local frame as ground
+        truth for this class of geometry (see the crop-drag math
+        elsewhere in this file). natural_size() is the local (pre-scale)
+        size; the item's actual transform is a pure (scale_x, scale_y)
+        scale (see set_scale_xy()), so multiplying by the *magnitude* of
+        each — a flip is a negative scale, not a size change — gives the
+        real on-canvas half-extent.
+        """
+        w, h = self.natural_size()
+        return (w / 2 * abs(self._scale_x), h / 2 * abs(self._scale_y))
+
     def _snap_position(self, proposed: QPointF) -> QPointF:
         """Snap the item's center to the canvas center, to another visible
-        reference image's center, or to a rule-of-thirds/golden-ratio
-        guide intersection (only for whichever of those guides the artist
-        has actually turned on — snapping never activates for a hidden
-        guide), within a zoom-independent catch radius. Hold Alt/Option to
-        bypass entirely.
+        reference image's center, to a rule-of-thirds/golden-ratio guide
+        intersection (only for whichever of those guides the artist has
+        actually turned on — snapping never activates for a hidden
+        guide), or edge-to-edge against the canvas or another visible
+        image (this item's own edge landing flush with the candidate
+        edge, not center-to-edge) — all within a zoom-independent catch
+        radius. Hold Alt/Option to bypass entirely.
         """
         if QApplication.keyboardModifiers() & Qt.AltModifier:
             return proposed
@@ -859,6 +877,7 @@ class ReferenceImageItem(InteractiveItem):
         views = scene.views()
         zoom = views[0].transform().m11() if views else 1.0
         tolerance = SNAP_TOLERANCE_PX / max(zoom, 0.01)
+        hw, hh = self._half_extent()
 
         xs: list[float] = []
         ys: list[float] = []
@@ -867,6 +886,10 @@ class ReferenceImageItem(InteractiveItem):
             rect = canvas_rect()
             xs.append(rect.center().x())
             ys.append(rect.center().y())
+            for ex in (rect.left(), rect.right()):
+                xs.extend((ex - hw, ex + hw))
+            for ey in (rect.top(), rect.bottom()):
+                ys.extend((ey - hh, ey + hh))
         reference_layer = getattr(scene, "reference_layer", None)
         if reference_layer is not None:
             for other in reference_layer.items():
@@ -874,6 +897,12 @@ class ReferenceImageItem(InteractiveItem):
                     continue
                 xs.append(other.pos().x())
                 ys.append(other.pos().y())
+                ohw, ohh = other._half_extent()
+                ox, oy = other.pos().x(), other.pos().y()
+                for ex in (ox - ohw, ox + ohw):
+                    xs.extend((ex - hw, ex + hw))
+                for ey in (oy - ohh, oy + ohh):
+                    ys.extend((ey - hh, ey + hh))
         guides_layer = getattr(scene, "guides_layer", None)
         if guides_layer is not None:
             if guides_layer.thirds.isVisible():

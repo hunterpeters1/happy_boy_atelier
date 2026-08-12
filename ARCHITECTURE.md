@@ -46,6 +46,8 @@ happy_boy_atelier/
       handle_frame.py           reusable interactive transform box (move/scale/rotate handles)
       point_handle.py            TwoPointHandle: shared draggable endpoint handle for two-point
                                  markers (DirectionArrowItem, MeasurementItem)
+      context_toolbar.py         SelectionContextToolbar: floating single-item action toolbar
+                                 (Duplicate/Flip/Lock/Delete), a CanvasView.viewport() child widget
       resize_math.py            corner-drag resize math (anchor/rotation-aware)
     layers/
       reference_layer.py        ReferenceImageItem + ReferenceLayerGroup (import, crop, opacity, lock,
@@ -341,6 +343,88 @@ to near-invisible — losing the only visual cue that an item is
 locked/hidden until you happen to hover it would be a regression, not
 polish. Layer-header rows are never marked `hoverable` and stay
 full-opacity structural navigation, not per-item detail.
+
+## Contact-sheet thumbnails (`_reference_thumbnail_icon()` in `layers_panel.py`)
+
+Reference-image rows show a small square crop of the actual photo instead
+of the generic "image" glyph every other marker type still uses — the
+outliner reads closer to a photographer's contact sheet than a generic
+file tree. Built from the same downscaled proxy `paint()` already reads
+(`ReferenceImageItem._get_display_pixmap()`) — no extra render. The
+proxy's own crop sub-rect is copied out, scaled with
+`Qt.KeepAspectRatioByExpanding`, then center-cropped to an exact square;
+plain scale-to-fit would visibly distort a non-square photo. Recomputed
+on every `refresh_structure()` rebuild rather than cached separately —
+that's already a full tree rebuild on any relevant change, so a second
+cache-invalidation path isn't worth adding.
+
+## Drag-to-reorder (`_ReorderableTree` in `layers_panel.py`)
+
+`StackedLayerMixin` plus `ReorderItemCommand`/`SendToBackCommand`/
+`BringToFrontCommand` already gave every reorderable layer group real
+forward/backward/to-back/to-front operations, wired to `_RowButtons`'
+arrow buttons — the only missing piece was the drag *gesture* itself.
+`_ReorderableTree` (a small `QTreeWidget` subclass used in place of a
+plain one) enables Qt's `InternalMove` drag/drop mode for the gesture,
+drop-indicator line, and accept/reject cursor only — its `dropEvent()`
+override never lets Qt actually move a `QTreeWidgetItem`; doing so would
+make the tree's own item order a second source of truth alongside each
+layer group's bucket list. Instead it computes the target bucket index
+(`LayersPanel._handle_reorder_drop()`) and pushes one new
+`MoveItemToIndexCommand` (`app/canvas/undo_commands.py`, same
+capture-on-redo/restore-on-undo shape as `SendToBackCommand`), then lets
+the resulting `refresh_structure()` (already wired to
+`undo_stack.indexChanged`) redraw the tree from the corrected model —
+so the two can never drift apart. Item rows list top-to-bottom in *print*
+order (top row = prints on top), the layer group's own bucket order
+*reversed* (see `layers_panel.py`'s own module docstring), so
+`_handle_reorder_drop()` computes the desired final top-to-bottom row
+order directly from the current rows and reverses it back for the target
+index, rather than doing delta arithmetic across the two orderings.
+Rejects: dropping on empty space, on a different layer section
+(`source_row.parent() is not target_row.parent()` — this single check
+also transparently rejects drops on header/separator rows, which are
+always top-level with `parent() is None`), or a non-linear `OnItem`/
+`OnViewport` drop indicator. Only genuinely reorderable rows
+(`_add_item_row()` called with a real `group`) keep
+`Qt.ItemIsDragEnabled`/`ItemIsDropEnabled` — every other row (headers,
+separators, tool/toggle/settings rows, and perspective's non-reorderable
+horizon/vanishing-point item rows) has both cleared, since
+`QTreeWidgetItem`'s own default flags make every row drag/drop-capable
+otherwise.
+
+## Floating selection context toolbar (`app/canvas/context_toolbar.py`)
+
+`SelectionContextToolbar` is a small `QWidget` parented to
+`CanvasView.viewport()` (not a top-level window, so no OS floating-window
+quirks) showing Duplicate/Flip Horizontal/Lock/Delete for whichever
+single item is currently selected, positioned just below its
+`sceneBoundingRect()` — below, not above, so it never collides with
+`HandleFrame`'s rotate handle. Driven by `CanvasScene.selection_changed`;
+deliberately scoped to exactly one selected item (multi-select already
+has the Properties panel's Batch Edit section for bulk actions, so this
+widget's job is purely cutting eye-travel for the common single-selection
+case). Every button calls the exact same method the right-click context
+menu or Edit menu already calls (`item.flip_horizontal()`,
+`scene.duplicate_selected_items()`, `scene.delete_selected_items()`,
+`item.set_locked()`) — an additional low-travel trigger surface, not new
+action logic, so undo/redo behaves identically regardless of which
+surface was used. Repositions on `zoom_changed` and both scrollbars'
+`valueChanged` (pan) so it tracks the selection through any view
+transform change, not just a selection change. `CanvasView.
+mousePressEvent()`/`mouseReleaseEvent()` call `set_suspended(True)`/
+`(False)` around every canvas press — a body drag can move the selected
+item right through where the toolbar is sitting, and it must never steal
+a press meant for the item/canvas underneath it; presses on the
+toolbar's own buttons never reach `CanvasView` at all, since they're
+delivered to the toolbar's child widgets directly. Styled with the
+existing `role="compact"` `QToolButton` QSS (hairline border, brass
+hover/checked) rather than a new widget style. Locking the selected item
+deselects it (`InteractiveItem.set_locked()`'s existing behavior — a
+locked item isn't interactively selectable), so clicking Lock here
+correctly makes the toolbar disappear along with the item's selection;
+that's the intended consequence of existing lock semantics, not a bug
+this widget needs to work around.
 
 ## Hardware motifs: rivets and trim marks
 

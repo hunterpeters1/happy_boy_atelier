@@ -27,7 +27,7 @@ assigned as ascending list-index (see e.g. ReferenceLayerGroup._reassign_z).
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -60,6 +60,12 @@ from ..layers.perspective_layer import VanishingPointItem, HorizonLineItem
 from .row_hover import install_row_hover
 
 _ROLE_ITEM = Qt.UserRole
+# The owning layer group, set only on rows _add_item_row() was given a
+# real `group` for (reference/composition/lighting — the reorderable
+# ones). Drag-to-reorder (_ReorderableTree.dropEvent()) reads this
+# directly rather than re-deriving "which group owns this item" from the
+# scene a second time.
+_ROLE_GROUP = Qt.UserRole + 1
 # Compact row-button icon size — bumped alongside the toolbar/tree icon
 # bumps below for legibility; was 15/16, then 17, then 20px.
 #
@@ -101,6 +107,33 @@ def _row_icon_and_label(item) -> tuple[str, str]:
         return "vanishing", f"Vanishing point ({item.label})"
     if isinstance(item, HorizonLineItem):
         return "vanishing", "Horizon line"
+    return "shapes", type(item).__name__
+
+
+def _reference_thumbnail_icon(item: ReferenceImageItem, size: int) -> QIcon:
+    """A small square contact-sheet-style thumbnail for a reference-image
+    row, replacing the generic "image" glyph for that row only — every
+    other marker type keeps its glyph icon; a thumbnail only means
+    something for an actual photo. Reuses the same downscaled display
+    proxy paint() already draws from
+    (ReferenceImageItem._get_display_pixmap()) — no extra render, and no
+    extra cache-invalidation plumbing needed since refresh_structure()
+    already fully rebuilds every row (and thus this icon) on any relevant
+    change.
+    """
+    proxy, source_rect = item._get_display_pixmap()
+    cropped = proxy.copy(source_rect.toRect())
+    if cropped.width() <= 0 or cropped.height() <= 0:
+        return icons.icon("image", size)
+    # KeepAspectRatioByExpanding + a center crop, not a plain scale to
+    # size x size -- a non-square crop stretched to fit would distort the
+    # photo; this instead reads like a real contact-sheet print (fill the
+    # square, crop the overhang) regardless of the source's own aspect
+    # ratio.
+    square = cropped.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+    x = max(0, (square.width() - size) // 2)
+    y = max(0, (square.height() - size) // 2)
+    return QIcon(square.copy(x, y, size, size))
     return "shapes", type(item).__name__
 
 
@@ -267,6 +300,40 @@ class _RowButtons(QWidget):
         self._fade.fade_to(1.0 if hovered else self._rest_opacity())
 
 
+class _ReorderableTree(QTreeWidget):
+    """Drag-to-reorder within one layer section. StackedLayerMixin
+    (app/layers/stacking_mixin.py) plus ReorderItemCommand/
+    SendToBackCommand/BringToFrontCommand already gave the Project Panel
+    real forward/backward/to-back/to-front operations, wired to
+    _RowButtons' arrow buttons — what was missing was only the drag
+    *gesture* on top of them.
+
+    Qt's own InternalMove drag/drop is used only for the gesture itself
+    (drag start, the drop-indicator line, accept/reject cursor) —
+    dropEvent() below never lets Qt actually move a QTreeWidgetItem
+    around. Doing so would make the tree's own item order a second
+    source of truth alongside each layer group's bucket list; instead
+    dropEvent() computes the target bucket index and pushes one
+    MoveItemToIndexCommand, and leaves the resulting refresh_structure()
+    (already wired to undo_stack.indexChanged — see
+    MainWindow._on_undo_index_changed) to redraw the tree from the
+    corrected model, so the two can never drift apart.
+    """
+
+    def __init__(self, panel: "LayersPanel", parent=None):
+        super().__init__(parent)
+        self._panel = panel
+
+    def dropEvent(self, event) -> None:
+        source_row = self.currentItem()
+        obj = source_row.data(0, _ROLE_ITEM) if source_row is not None else None
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        target_row = self.itemAt(pos)
+        if obj is not None:
+            self._panel._handle_reorder_drop(obj, source_row, target_row, self.dropIndicatorPosition())
+        event.ignore()  # never let Qt itself move tree items -- see class docstring
+
+
 class LayersPanel(QWidget):
     tool_selected = Signal(str)
     request_import = Signal()
@@ -318,12 +385,16 @@ class LayersPanel(QWidget):
         search_row.addWidget(self.search_edit)
         outer.addLayout(search_row)
 
-        self.tree = QTreeWidget()
+        self.tree = _ReorderableTree(self)
         self.tree.setHeaderHidden(True)
         self.tree.setColumnCount(2)
         self.tree.setIndentation(14)
         self.tree.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tree.setDragEnabled(True)
+        self.tree.setAcceptDrops(True)
+        self.tree.setDropIndicatorShown(True)
+        self.tree.setDragDropMode(QAbstractItemView.InternalMove)
         # NOT uniform: rows genuinely vary — most are a single icon+label,
         # but the tool-activation rows and the perspective settings form
         # are taller multi-widget content. setUniformRowHeights(True) makes
@@ -418,6 +489,11 @@ class LayersPanel(QWidget):
         # on the wrong starting size.
         row.setFont(0, QFont(C.FONT_FAMILY_UI, 13, QFont.Bold))
         row.setExpanded(self._expanded_default.get(kind, True))
+        # Structural navigation, not a reorderable item -- see
+        # _span_full_width()'s matching comment for why this needs
+        # explicit clearing rather than relying on QTreeWidgetItem's
+        # drag/drop-capable-by-default flags.
+        row.setFlags(row.flags() & ~(Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled))
         self._layer_rows[kind] = row
 
         buttons = _RowButtons(visible=group.isVisible(), locked=self.scene.layer_locked(kind), show_lock=show_lock)
@@ -461,6 +537,13 @@ class LayersPanel(QWidget):
         """
         index = self.tree.indexFromItem(row)
         self.tree.setFirstColumnSpanned(index.row(), index.parent(), True)
+        # Every caller of this method is a structural row (separator, tool-
+        # activation row, toggle row, perspective settings sub-row) —
+        # QTreeWidgetItem's own default flags make every row drag/drop-
+        # capable, which would otherwise let one of these get "dragged"
+        # with no reorder semantics behind it at all. Real item rows opt
+        # back into ItemIsDragEnabled explicitly in _add_item_row().
+        row.setFlags(row.flags() & ~(Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled))
 
     def _add_item_row(self, parent: QTreeWidgetItem, obj, group=None) -> QTreeWidgetItem:
         """`group` is the owning layer group if (and only if) it supports
@@ -472,12 +555,27 @@ class LayersPanel(QWidget):
         """
         icon_name, label = _row_icon_and_label(obj)
         row = QTreeWidgetItem(parent)
-        row.setIcon(0, icons.icon(icon_name, _ROW_ICON_PX))
+        if isinstance(obj, ReferenceImageItem):
+            row.setIcon(0, _reference_thumbnail_icon(obj, _ROW_ICON_PX))
+        else:
+            row.setIcon(0, icons.icon(icon_name, _ROW_ICON_PX))
         row.setText(0, label)
         # A narrow dock elides long filenames/note text with "…" and gives
         # no other way to read the full name — the tooltip is that way.
         row.setToolTip(0, label)
         row.setData(0, _ROLE_ITEM, obj)
+        if group is not None:
+            row.setData(0, _ROLE_GROUP, group)
+            # Reorderable — QTreeWidgetItem's own default flags already
+            # include ItemIsDragEnabled/ItemIsDropEnabled, so this is a
+            # no-op here; kept explicit so the two branches read as a
+            # real decision rather than "drag just happens to work."
+            row.setFlags(row.flags() | Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled)
+        else:
+            # Perspective's horizon/vanishing points: real item rows, but
+            # not reorderable at all (no group, no up/down buttons either
+            # — see this method's docstring) — no drag handle for them.
+            row.setFlags(row.flags() & ~(Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled))
         self._row_for_obj[id(obj)] = row
 
         can_fwd = group.can_move_forward(obj) if group is not None else None
@@ -515,6 +613,56 @@ class LayersPanel(QWidget):
             return
         from ..canvas.undo_commands import BringToFrontCommand
         self.scene.undo_stack.push(BringToFrontCommand(group, item))
+
+    def _handle_reorder_drop(self, obj, source_row, target_row, indicator) -> bool:
+        """Called by _ReorderableTree.dropEvent() with the row actually
+        being dragged and whatever row the pointer was released over.
+        Returns False (no-op) for anything that isn't a clean same-layer-
+        section reorder — dropping on empty space, on a header/tool row,
+        or across a layer-section boundary — rather than guessing at a
+        "closest valid" fallback.
+        """
+        if target_row is None or target_row is source_row:
+            return False
+        if source_row.parent() is None or source_row.parent() is not target_row.parent():
+            return False  # different layer section (or a top-level row) -- reject
+        if indicator not in (QAbstractItemView.AboveItem, QAbstractItemView.BelowItem):
+            return False  # "OnItem"/"OnViewport" aren't a linear reorder
+        group = source_row.data(0, _ROLE_GROUP)
+        target_obj = target_row.data(0, _ROLE_ITEM)
+        if group is None or target_obj is None or target_row.data(0, _ROLE_GROUP) is not group:
+            return False
+        if group.index_of(obj) is None or group.index_of(target_obj) is None:
+            return False
+
+        # Item rows list top-to-bottom in *print* order (top row = prints
+        # on top), which is the layer group's own bucket order *reversed*
+        # (see this module's docstring) -- so the cleanest way to get the
+        # target bucket index right is to compute the desired final
+        # top-to-bottom row order directly from the current rows, then
+        # reverse it back, rather than doing delta arithmetic on indices
+        # in two different orderings.
+        parent = source_row.parent()
+        tree_order = [
+            parent.child(i).data(0, _ROLE_ITEM)
+            for i in range(parent.childCount())
+            if parent.child(i).data(0, _ROLE_ITEM) is not None
+        ]
+        if obj not in tree_order or target_obj not in tree_order:
+            return False
+        tree_order.remove(obj)
+        insert_at = tree_order.index(target_obj)
+        if indicator == QAbstractItemView.BelowItem:
+            insert_at += 1
+        tree_order.insert(insert_at, obj)
+
+        target_index = list(reversed(tree_order)).index(obj)
+        if target_index == group.index_of(obj):
+            return False  # dropped back where it already was
+
+        from ..canvas.undo_commands import MoveItemToIndexCommand
+        self.scene.undo_stack.push(MoveItemToIndexCommand(group, obj, target_index, "Reorder"))
+        return True
 
     def _add_tool_row(self, parent: QTreeWidgetItem, tools: list[tuple[str, str, str]]) -> None:
         """tools: list of (tool_id, icon_name, tooltip)."""

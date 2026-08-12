@@ -259,6 +259,32 @@ class BringToFrontCommand(QUndoCommand):
             self._group.move_item_to_index(self._item, self._old_index)
 
 
+class MoveItemToIndexCommand(QUndoCommand):
+    """Moves `item` to an arbitrary target index within its bucket — the
+    undo wrapper for a drag-and-drop reorder in the Project Panel (see
+    LayersPanel's tree drop handling). Same capture-on-redo pattern as
+    SendToBackCommand/BringToFrontCommand above: `group` must expose
+    index_of(item)/move_item_to_index(item, index), and undo restores the
+    exact pre-drag index rather than assuming symmetry with the drop
+    target.
+    """
+
+    def __init__(self, group, item, target_index: int, label: str = "Reorder"):
+        super().__init__(label)
+        self._group = group
+        self._item = item
+        self._target_index = target_index
+        self._old_index: int | None = None
+
+    def redo(self) -> None:
+        self._old_index = self._group.index_of(self._item)
+        self._group.move_item_to_index(self._item, self._target_index)
+
+    def undo(self) -> None:
+        if self._old_index is not None:
+            self._group.move_item_to_index(self._item, self._old_index)
+
+
 class CopyItemCommand(QUndoCommand):
     """Duplicates `clone` (already constructed, not yet added to the scene)
     as a new sibling of `item` in `group`. On redo the clone is added to

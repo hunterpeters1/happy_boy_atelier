@@ -102,9 +102,18 @@ looking for "is there a way to…", check here before assuming there isn't.
 Each imported photo is its own object:
 
 - **Drag** to move — snaps its center to the canvas center, to any other
-  *visible* reference image's center, or to a Rule of Thirds/Golden Ratio
+  *visible* reference image's center, to a Rule of Thirds/Golden Ratio
   guide intersection if that guide is currently turned on (Project Panel
-  > Guides); hold **Alt** to bypass snapping entirely.
+  > Guides), or edge-to-edge against the canvas bounds or another visible
+  image (its own edge landing flush with the target edge, not just
+  center-to-center); hold **Alt** to bypass snapping entirely.
+- **Selection toolbar** — selecting exactly one item on the canvas shows a
+  small floating toolbar just below it with Duplicate, Flip Horizontal
+  (reference images only), Lock, and Delete — the same actions as the
+  right-click menu and Edit menu, just closer to the item so you don't
+  have to travel to a dock for the common ones. Hides for a multi-select
+  (use the Properties panel's Batch Edit section there) and while
+  actively dragging the item.
 - **Resize** via corner handles — free (independent width/height) by
   default; hold **Shift** to lock aspect ratio.
 - **Rotate** via the handle above the image; hold **Shift** to snap to
@@ -222,14 +231,17 @@ needed.
 
 - **Project Panel** (left dock) — one outliner listing every layer and
   every item placed in it (not just reference images), each a named,
-  searchable row with inline visibility/lock toggles. A search box at
-  the top filters items by name across all layers. Reference/composition/
-  lighting rows have up/down buttons (step-by-step reorder) plus
-  to-back/to-front buttons (absolute positioning) for adjusting stacking
-  position within their layer (perspective and guide items don't reorder).
-  Item rows' eye/lock icons rest dim and rise to full opacity on hover —
-  a row you've actually hidden or locked stays legible even at rest, so
-  you don't have to hover every row to notice.
+  searchable row with inline visibility/lock toggles. Reference images
+  show a small square thumbnail of the actual photo instead of a generic
+  icon, so the list reads like a contact sheet. A search box at the top
+  filters items by name across all layers. Reference/composition/lighting
+  rows can be reordered within their own layer either by dragging a row
+  to a new position, or with the up/down (step-by-step) and to-back/
+  to-front (absolute) buttons — perspective and guide items don't reorder,
+  and a drag can't cross into a different layer's section. Item rows'
+  eye/lock icons rest dim and rise to full opacity on hover — a row
+  you've actually hidden or locked stays legible even at rest, so you
+  don't have to hover every row to notice.
 - **Properties panel** (right dock) — edits whatever's currently
   selected. Select 2+ items to get a **Batch Edit** section: opacity
   nudges (±5%), scale nudges (×0.95/×1.05, only shown if every selected
