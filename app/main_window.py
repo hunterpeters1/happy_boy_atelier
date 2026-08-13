@@ -61,6 +61,17 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(C.APP_NAME)
         self.resize(1440, 920)
+        # Per-pixel window transparency (Focus Mode's "clear desk", see
+        # toggle_focus_mode()) needs this set before the window's native
+        # handle exists -- confirmed toggling it at runtime, after the
+        # window is already showing, does not reliably take effect (Qt's
+        # own docs already warned this was the risk; a real Windows test
+        # confirmed it in practice). Set once here, permanently, instead.
+        # Harmless outside Focus Mode: normal Draft-mode rendering always
+        # paints the desk area fully opaque, so this flag alone has no
+        # visible effect until CanvasScene.set_desk_transparent()/
+        # CanvasView.set_desk_transparent() actually skip painting it.
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
 
         self.current_path: Path | None = None
         self.meta = ProjectMeta()
@@ -532,13 +543,16 @@ class MainWindow(QMainWindow):
         own desk color or the active theme competes with the arrangement
         itself. The canvas rect and everything on it (paper, shadow,
         rivets, every placed item) keeps painting fully opaque as always;
-        only the void beyond it goes clear. This needs
-        Qt.WA_TranslucentBackground on the top-level window itself
-        (toggled here alongside CanvasScene.set_desk_transparent(), see
-        that method) — per Qt's own docs this attribute is most reliable
-        set before a widget is first shown, so toggling it at runtime like
-        this is a known platform risk worth re-checking if it doesn't take
-        effect on a given system. Also reveals a window-opacity slider
+        only the void beyond it goes clear. This only calls
+        CanvasScene.set_desk_transparent() here — the window-level
+        Qt.WA_TranslucentBackground that actually makes transparency
+        possible at all is set once, permanently, in __init__, not
+        toggled here. An earlier version toggled it at runtime on
+        entering/exiting Focus Mode and confirmed on a real Windows
+        machine that it silently doesn't take effect that way (Qt's own
+        docs already warned this was the risk for a flag set after the
+        native window handle exists) — see __init__'s comment. Also
+        reveals a window-opacity slider
         (status bar) — a separate, complementary control: the slider dims
         the whole window (chrome and canvas alike) uniformly, while the
         desk stays a clean hole regardless of where the slider sits.
@@ -556,7 +570,6 @@ class MainWindow(QMainWindow):
                 if dock is not None:
                     dock.setVisible(False)
             self.toolbar.setVisible(False)
-            self.setAttribute(Qt.WA_TranslucentBackground, True)
             if self.scene is not None:
                 self.scene.set_desk_transparent(True)
             self.focus_opacity_label.setVisible(True)
@@ -569,7 +582,6 @@ class MainWindow(QMainWindow):
             self.toolbar.setVisible(self._pre_focus_toolbar_visible)
             if self.scene is not None:
                 self.scene.set_desk_transparent(False)
-            self.setAttribute(Qt.WA_TranslucentBackground, False)
             self.focus_opacity_label.setVisible(False)
             self.focus_opacity_slider.setVisible(False)
             # setValue(100) only fires valueChanged (and so only resets

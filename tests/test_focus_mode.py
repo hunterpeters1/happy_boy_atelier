@@ -55,6 +55,24 @@ def test_focus_mode_restores_prior_dock_visibility_exactly(qapp):
     assert win.swatches_dock.isVisible() is True
 
 
+def test_main_window_is_translucent_capable_from_construction(qapp):
+    """Qt.WA_TranslucentBackground must be set before the native window
+    handle exists to reliably take effect -- confirmed on a real Windows
+    machine that toggling it at runtime (on entering/exiting Focus Mode)
+    silently doesn't work. It's set once, permanently, in __init__
+    instead, and stays on regardless of Focus Mode state -- harmless
+    outside Focus Mode since normal Draft-mode rendering always paints
+    the desk area fully opaque anyway.
+    """
+    win = _window(qapp)
+    assert win.testAttribute(Qt.WA_TranslucentBackground) is True
+
+    win.focus_mode_action.trigger()  # enter
+    assert win.testAttribute(Qt.WA_TranslucentBackground) is True
+    win.focus_mode_action.trigger()  # exit
+    assert win.testAttribute(Qt.WA_TranslucentBackground) is True
+
+
 def test_focus_mode_makes_desk_transparent_and_restores_it(qapp):
     win = _window(qapp)
     win.meta.bg_color = "#336699"
@@ -62,7 +80,6 @@ def test_focus_mode_makes_desk_transparent_and_restores_it(qapp):
 
     win.focus_mode_action.trigger()  # enter
     assert win.scene._desk_transparent is True
-    assert win.testAttribute(Qt.WA_TranslucentBackground) is True
     # Neither the live scene color nor the project's own saved preference
     # is touched -- set_desk_transparent() is a separate rendering flag,
     # not a color override.
@@ -71,7 +88,6 @@ def test_focus_mode_makes_desk_transparent_and_restores_it(qapp):
 
     win.focus_mode_action.trigger()  # exit
     assert win.scene._desk_transparent is False
-    assert win.testAttribute(Qt.WA_TranslucentBackground) is False
     assert win.scene._bg_color == "#336699"
     assert win.meta.bg_color == "#336699"
 

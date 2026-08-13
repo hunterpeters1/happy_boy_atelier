@@ -263,24 +263,35 @@ drift from the geometry.
   flag is set, leaving those pixels unpainted; the canvas rect and
   everything on it (paper, shadow, rivets, every placed item) keeps
   painting fully opaque underneath regardless, so only the void goes
-  clear. Getting an actual hole requires three things to line up: (1)
-  `MainWindow` gets `Qt.WA_TranslucentBackground` toggled on the
-  top-level window itself, enabling per-pixel alpha compositing at all;
-  (2) `CanvasView.set_desk_transparent()` (`app/canvas/canvas_view.py`)
+  clear. Getting an actual hole requires two things to line up: (1)
+  `MainWindow` itself needs `Qt.WA_TranslucentBackground`, enabling
+  per-pixel alpha compositing on the top-level window at all; (2)
+  `CanvasView.set_desk_transparent()` (`app/canvas/canvas_view.py`)
   clears its own fallback `backgroundBrush` (used only for the sliver
-  beyond the scene's padded rect) to `Qt.NoBrush`; (3) the same method
-  also sets `WA_TranslucentBackground` and disables `autoFillBackground`
-  on the view's *viewport* widget specifically, since it would otherwise
+  beyond the scene's padded rect) to `Qt.NoBrush`, and sets
+  `WA_TranslucentBackground` + disables `autoFillBackground` on the
+  view's *viewport* widget specifically, since it would otherwise
   auto-paint an opaque backdrop before the scene's own `drawBackground()`
   gets a chance to leave the desk area untouched. The menu bar and status
   bar stay solid throughout, since both carry an explicit `background:`
   rule in `theme.py`'s stylesheet, which Qt still paints opaquely
-  regardless of the top-level window's translucency attribute. Per Qt's
-  own docs, `WA_TranslucentBackground` is most reliable when set before a
-  widget's first `show()` — toggling it at runtime on an already-shown
-  window (unavoidable here, since Focus Mode is a live toggle on the
-  app's one persistent `MainWindow`) is a known platform-dependent risk
-  worth re-verifying if it doesn't take effect on a given system.
+  regardless of the top-level window's translucency attribute.
+
+  `MainWindow`'s own `WA_TranslucentBackground` is set exactly once, in
+  `__init__`, before the window is ever shown, and stays on permanently
+  — it is **not** toggled per Focus Mode entry/exit. An earlier version
+  toggled it at runtime alongside the rest of this method, matching how
+  every other Focus Mode state here is snapshotted/restored; confirmed
+  on a real Windows machine that this silently does not work, because
+  per Qt's own docs the attribute is only reliable when set before the
+  native window handle exists — toggling it after the window is already
+  showing (as every `toggle_focus_mode()` call necessarily would, since
+  `MainWindow` is the app's one persistent top-level window) doesn't
+  actually change how the OS composites it. Setting it once at
+  construction and controlling the *visible* effect purely through what
+  `CanvasScene`/`CanvasView` paint or skip is the fix, and is harmless
+  outside Focus Mode since normal Draft-mode rendering always paints the
+  desk area fully opaque regardless of the flag.
 
   Also reveals a status-bar window-opacity slider
   (`MainWindow.focus_opacity_slider`, `QWidget.setWindowOpacity()`) — a
