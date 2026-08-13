@@ -102,6 +102,12 @@ design rationale. Landed in phases.
   neither touches the project's saved desk color, and both reset
   automatically on exit. (An earlier version of this dropped the desk to
   pure black instead of making it transparent; changed after review.)
+  Fixed a follow-up bug in the transparency itself: it was toggling
+  `Qt.WA_TranslucentBackground` on entering/exiting Focus Mode, which a
+  real Windows test showed silently doesn't work, since that flag is
+  only reliable when set before the window's native handle exists. It's
+  now set once, permanently, at startup instead, with no visible effect
+  outside Focus Mode.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 
