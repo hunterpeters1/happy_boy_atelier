@@ -78,8 +78,11 @@ Each imported photo is its own object:
   so common actions stay close at hand.
 - **Resize** via the corner handles — free by default, hold **Shift** to
   lock the aspect ratio.
-- **Rotate** via the handle above the image; hold **Shift** to snap to
-  15° increments.
+- **Rotate** via the handle above the image; snaps to level/90°/180°/270°
+  when you get close, for squaring up a photo without fighting a fiddly
+  freehand angle. Hold **Shift** for a hard snap to 15° increments
+  instead (finer control); hold **Alt** to rotate completely freely with
+  no snapping at all.
 - **Crop** by dragging any edge handle inward — no separate crop mode.
   Properties panel has a "Reset Crop" button to undo it.
 - **Flip Horizontal / Vertical** — right-click, or Edit menu.

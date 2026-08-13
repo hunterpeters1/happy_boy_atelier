@@ -201,8 +201,24 @@ resize handles at the corners/edges of the item's bounding box plus one
 rotate handle above it. Dragging a corner updates a `QTransform` combining
 scale; dragging the rotate handle updates rotation around the item's
 center, snapping to 15° increments while Shift is held. This keeps
-"arrange references" feeling precise rather than fiddly. A plain body
-drag (not a handle drag) also snaps the image's center to the canvas
+"arrange references" feeling precise rather than fiddly.
+
+A *default* (no-modifier) rotate-handle drag additionally has its own
+lighter-touch snap: `ROTATION_MAGNETIC_SNAP_DEG` (`reference_layer.py`,
+`_update_handle_drag()`'s "rotate" branch) magnetically catches the
+nearest cardinal orientation (0/90/180/270 — any multiple of 90) when
+the drag is already within 4° of one, the same "on by default, Alt
+bypasses" posture `_snap_position()` uses for position dragging (see
+below), rather than a hard grid applied across the whole drag. Deliberately
+independent of Shift's own 15°-grid hard snap, which is unchanged and
+takes priority when held (both happen to agree at exact multiples of 90,
+since 90 is itself a multiple of 15, but a Shift-held drag can land on
+75°/105°/etc. that the default magnetic snap would never produce, and a
+default-only drag well away from a cardinal — e.g. 40° — snaps to
+neither). Scoped to reference images' own whole-item rotation only —
+`MeasurementItem`'s Shift-held endpoint-angle-around-pivot snap (see Two-point
+markers below) still only has the 15°-grid behavior, not this magnetic one.
+A plain body drag (not a handle drag) also snaps the image's center to the canvas
 center, to another visible reference image's center, or — only while the
 corresponding guide is actually turned on — to a Rule of Thirds/Golden
 Ratio intersection (`ReferenceImageItem._snap_position()` in

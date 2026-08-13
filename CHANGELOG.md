@@ -130,6 +130,12 @@ design rationale. Landed in phases.
   relevant (autosave is the one exception: turning it off or changing
   the interval takes effect immediately, since it drives an
   already-running timer).
+- **Reference images magnetically snap to level/90°/180°/270° while
+  rotating** — a default (no-modifier) drag now catches the nearest
+  cardinal orientation when you're already close to it, for squaring up
+  a photo without fighting a fiddly freehand angle. Independent of the
+  existing Shift-held hard snap to 15° increments, which is unchanged;
+  hold **Alt** to rotate with no snapping at all.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

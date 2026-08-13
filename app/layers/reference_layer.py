@@ -24,6 +24,16 @@ from .guide_overlay import GOLDEN_SECTION
 from .stacking_mixin import StackedLayerMixin
 
 ROTATION_SNAP_DEG = 15.0
+# Magnetic catch radius (degrees) around each cardinal orientation (0/90/
+# 180/270, i.e. any multiple of 90) applied to a *default* (no-modifier)
+# rotation drag -- squaring up a reference photo (leveling it, or turning
+# it a quarter turn) is common enough to deserve a snap-into-place feel
+# without requiring Shift, the same "on by default, Alt bypasses" posture
+# _snap_position() already uses for position dragging. Deliberately much
+# smaller than ROTATION_SNAP_DEG's own 15° Shift-held hard-snap spacing —
+# this only catches when already close to level, it doesn't quantize the
+# whole drag.
+ROTATION_MAGNETIC_SNAP_DEG = 4.0
 # Screen-pixel tolerance for position snapping — converted to scene units
 # per-drag via the current view zoom, so the catch radius feels the same
 # whether zoomed in or out.
@@ -525,6 +535,10 @@ class ReferenceImageItem(InteractiveItem):
             new_rotation = self._handle_press_rotation + (current_angle - self._handle_press_mouse_angle)
             if event.modifiers() & Qt.ShiftModifier:
                 new_rotation = round(new_rotation / ROTATION_SNAP_DEG) * ROTATION_SNAP_DEG
+            elif not (event.modifiers() & Qt.AltModifier):
+                nearest_cardinal = round(new_rotation / 90.0) * 90.0
+                if abs(new_rotation - nearest_cardinal) <= ROTATION_MAGNETIC_SNAP_DEG:
+                    new_rotation = nearest_cardinal
             self.setRotation(new_rotation)
         self._handles.reposition()
 
