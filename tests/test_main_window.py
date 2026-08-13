@@ -40,6 +40,20 @@ def clean_templates(qapp):
     QSettings().remove(_TEMPLATES_SETTINGS_KEY)
 
 
+@pytest.fixture
+def clean_settings(qapp):
+    from PySide6.QtCore import QSettings
+    keys = [
+        "settings/autosaveIntervalMs", "settings/defaultUnit",
+        "settings/defaultExportDpi", "settings/showRulersByDefault",
+    ]
+    for key in keys:
+        QSettings().remove(key)
+    yield
+    for key in keys:
+        QSettings().remove(key)
+
+
 def _window(qapp) -> MainWindow:
     win = MainWindow()
     win.show()
@@ -191,3 +205,66 @@ def test_new_project_without_guides_leaves_defaults(library_dir_tmp, clean_templ
     assert win.scene.guides_layer.thirds.isVisible() is False
     assert win.scene.guides_layer.golden.isVisible() is False
     assert win.scene.guides_layer.grid.isVisible() is False
+
+
+def test_options_menu_replaces_help_menu(library_dir_tmp, qapp):
+    win = _window(qapp)
+    top_level_titles = [a.text() for a in win.menuBar().actions()]
+
+    assert any("Options" in t for t in top_level_titles)
+    assert not any("Help" in t for t in top_level_titles)
+
+
+def test_options_menu_contains_settings_upload_and_about(library_dir_tmp, qapp):
+    win = _window(qapp)
+    options_menu = None
+    for action in win.menuBar().actions():
+        if "Options" in action.text():
+            options_menu = action.menu()
+            break
+
+    assert options_menu is not None
+    labels = [a.text() for a in options_menu.actions() if not a.isSeparator()]
+    assert any("Settings" in t for t in labels)
+    assert any("Upload From Phone" in t for t in labels)
+    assert any("About" in t for t in labels)
+
+
+def test_ruler_default_reflects_setting_at_construction(library_dir_tmp, clean_settings, qapp):
+    from app import settings
+
+    settings.set_show_rulers_by_default(False)
+    win = _window(qapp)
+
+    assert win.ruler_action.isChecked() is False
+
+
+def test_show_settings_applies_autosave_interval_live(library_dir_tmp, clean_settings, qapp, monkeypatch):
+    from app import settings
+    from app.dialogs.settings_dialog import SettingsDialog
+
+    win = _window(qapp)
+    assert win._autosave_timer.isActive()
+
+    def fake_exec(self):
+        self.autosave_combo.setCurrentIndex(self.autosave_combo.findData(settings.AUTOSAVE_OFF_MS))
+        self._on_save()
+        return SettingsDialog.Accepted
+
+    monkeypatch.setattr(SettingsDialog, "exec", fake_exec)
+    win._show_settings()
+
+    assert settings.autosave_interval_ms() == settings.AUTOSAVE_OFF_MS
+    assert not win._autosave_timer.isActive()
+
+
+def test_show_settings_does_nothing_on_cancel(library_dir_tmp, clean_settings, qapp, monkeypatch):
+    from app.dialogs.settings_dialog import SettingsDialog
+
+    win = _window(qapp)
+    original_interval = win._autosave_timer.interval()
+
+    monkeypatch.setattr(SettingsDialog, "exec", lambda self: SettingsDialog.Rejected)
+    win._show_settings()
+
+    assert win._autosave_timer.interval() == original_interval

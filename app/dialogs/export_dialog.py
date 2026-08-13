@@ -38,6 +38,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from .. import settings as user_settings
+
 _FILTERS = {"png": "PNG Image (*.png)", "jpg": "JPEG Image (*.jpg)", "pdf": "PDF Planning Sheet (*.pdf)"}
 _INVALID_CHARS = re.compile(r'[<>:"/\\|?*]')
 # Presets store {format, dpi, include_study_effect} only -- never the
@@ -152,7 +154,7 @@ class ExportDialog(QDialog):
         dpi_label.setProperty("role", "hint")
         self.dpi_spin = QSpinBox()
         self.dpi_spin.setRange(72, 1200)
-        self.dpi_spin.setValue(300)
+        self.dpi_spin.setValue(user_settings.default_export_dpi())
         self.dpi_spin.setToolTip(
             "Resolution of the exported image, in pixels per inch. 300 is a "
             "standard print resolution; higher only matters for large-format "

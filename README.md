@@ -62,7 +62,7 @@ something and not finding it up top.
   separate from any single project file. Add images with the library's
   own button, then drag or double-click a thumbnail to bring it into the
   current painting. Searchable by name; remove an entry without touching
-  the original file on disk. Photos sent from **Help > Upload From
+  the original file on disk. Photos sent from **Options > Upload From
   Phone…** (see below) appear here automatically, live, with no import
   step needed.
 
@@ -217,12 +217,24 @@ and updated live as you change format:
 View > Appearance offers Light, Dark, Current (matches OS), and Hack
 Mode, a developer theme with extra debug tools.
 
-**Help > About Happy Boy Atelier** shows the app's version and mission
-statement.
+### Options
+
+- **Options > Settings…** — a few standard defaults you can customize:
+  autosave interval (or turn it off entirely), the unit New Painting
+  starts with, the DPI Export starts with, and whether new windows show
+  rulers by default. All four are pure workflow preferences — nothing
+  here is saved into any painting, and changing one only affects what
+  happens *next* (a future New Painting, a future Export, a future
+  autosave tick), never anything already open or already exported.
+  Autosave changes take effect immediately; the others apply the next
+  time that dialog/window opens.
+- **Options > Upload From Phone…** — see below.
+- **Options > About Happy Boy Atelier** shows the app's version and
+  mission statement.
 
 ## Upload from phone
 
-The easiest way in: **Help > Upload From Phone…** starts the uploader
+The easiest way in: **Options > Upload From Phone…** starts the uploader
 for you and shows a QR code, URL, and one-time PIN right in the dialog —
 no terminal needed. Scan the QR (or type the URL) from a phone on the
 same WiFi network, enter the PIN, then upload photos through the

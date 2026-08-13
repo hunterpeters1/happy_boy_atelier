@@ -25,6 +25,7 @@ from . import debug_tools
 from . import icons
 from . import project_templates
 from . import recovery
+from . import settings
 from . import themes
 from .hacker_status import HackerStatusWidget
 from .theme import apply_theme
@@ -44,6 +45,7 @@ from .canvas.undo_commands import AddItemCommand
 from .dialogs.about_dialog import AboutDialog
 from .dialogs.command_palette import CommandPalette
 from .dialogs.phone_upload_dialog import PhoneUploadDialog
+from .dialogs.settings_dialog import SettingsDialog
 from .dialogs.export_dialog import ExportDialog
 from .dialogs.new_project_dialog import NewProjectDialog
 from .dialogs.start_screen import StartScreen
@@ -163,12 +165,13 @@ class MainWindow(QMainWindow):
 
         # Phase 0.3: periodic crash-recovery snapshot. Independent of the
         # user's own Save/Save As — see app/recovery.py for the full
-        # lifecycle. Interval is hardcoded per the Phase 0 decision
-        # (constants.AUTOSAVE_INTERVAL_MS); not user-configurable yet.
+        # lifecycle. Interval is user-configurable (Options > Settings…,
+        # see app/settings.py) with a 0 sentinel for "off" — never handed
+        # to QTimer.setInterval() directly, since an interval of 0 would
+        # fire continuously; _apply_autosave_interval() below guards it.
         self._autosave_timer = QTimer(self)
-        self._autosave_timer.setInterval(C.AUTOSAVE_INTERVAL_MS)
         self._autosave_timer.timeout.connect(self._autosave_tick)
-        self._autosave_timer.start()
+        self._apply_autosave_interval()
 
     # -- crash recovery -------------------------------------------------
     def _start_project_or_offer_recovery(self) -> None:
@@ -471,7 +474,7 @@ class MainWindow(QMainWindow):
             lambda checked: self.view.set_ruler_visible(checked) if self.view else None,
             checkable=True,
         )
-        self.ruler_action.setChecked(True)
+        self.ruler_action.setChecked(settings.show_rulers_by_default())
         view_menu.addSeparator()
         # Not "Tab" despite that being the conventional distraction-free
         # key in Photoshop/Krita/Blender: a bare Tab QAction shortcut here
@@ -503,9 +506,17 @@ class MainWindow(QMainWindow):
             appearance_menu.addAction(action)
             self._theme_actions[mode] = action
 
-        help_menu = menu.addMenu("&Help")
-        self._add_action(help_menu, "Upload From Phone…", None, self._show_phone_upload)
-        self._add_action(help_menu, "About Happy Boy Atelier", None, self._show_about)
+        # "Options" rather than the conventional "Help" — this menu is
+        # this app's one catch-all for app-level (not project-level)
+        # actions: customizing your own setup (Settings…), the phone
+        # uploader, and app identity (About). None of those are really
+        # "help" in the documentation-lookup sense the name usually
+        # implies elsewhere.
+        options_menu = menu.addMenu("&Options")
+        self._add_action(options_menu, "Settings…", None, self._show_settings)
+        options_menu.addSeparator()
+        self._add_action(options_menu, "Upload From Phone…", None, self._show_phone_upload)
+        self._add_action(options_menu, "About Happy Boy Atelier", None, self._show_about)
 
         # One QAction per action, shared verbatim by menu and toolbar — a
         # QAction built for the toolbar alone (the old toolbar.addAction(
@@ -748,6 +759,14 @@ class MainWindow(QMainWindow):
         menu.addAction(action)
         return action
 
+    def _show_settings(self) -> None:
+        if SettingsDialog(self).exec():
+            # Only autosave needs live re-application -- default unit/DPI/
+            # rulers are read fresh wherever they're used next (a future
+            # New Painting, a future Export, a future window launch), not
+            # cached anywhere on self.
+            self._apply_autosave_interval()
+
     def _show_phone_upload(self) -> None:
         # Non-modal (show(), not exec()) — see PhoneUploadDialog's own
         # docstring for why: the whole point is watching the Reference
@@ -949,6 +968,20 @@ class MainWindow(QMainWindow):
         self._update_window_title()
         self._note_recent_file(path)
         self.statusBar().showMessage(f"Saved to {path.name}", 4000)
+
+    def _apply_autosave_interval(self) -> None:
+        """(Re)reads the current autosave preference and starts/stops the
+        timer accordingly. Called once at startup and again right after
+        Settings… is saved, so a changed interval (or turning autosave
+        off entirely) takes effect immediately rather than needing a
+        restart.
+        """
+        interval_ms = settings.autosave_interval_ms()
+        if interval_ms == settings.AUTOSAVE_OFF_MS:
+            self._autosave_timer.stop()
+            return
+        self._autosave_timer.setInterval(interval_ms)
+        self._autosave_timer.start()
 
     def _autosave_tick(self) -> None:
         """Write a crash-recovery snapshot if there's unsaved work. Never

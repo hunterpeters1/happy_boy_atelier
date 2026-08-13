@@ -15,6 +15,7 @@ import pytest
 from PySide6.QtCore import QSettings
 
 from app import project_templates
+from app import settings as user_settings
 from app.dialogs.new_project_dialog import NewProjectDialog
 from app.project_templates import _SETTINGS_KEY
 
@@ -26,11 +27,40 @@ def clean_templates(qapp):
     QSettings().remove(_SETTINGS_KEY)
 
 
+@pytest.fixture
+def clean_settings(qapp):
+    QSettings().remove("settings/defaultUnit")
+    yield
+    QSettings().remove("settings/defaultUnit")
+
+
 def test_template_section_hidden_with_no_saved_templates(clean_templates):
     dlg = NewProjectDialog()
     assert dlg.template_section_label.isHidden()
     assert dlg.template_list.isHidden()
     assert dlg.selected_template_guides() is None
+
+
+def test_default_unit_falls_back_to_inches_when_no_preference_set(clean_templates, clean_settings):
+    dlg = NewProjectDialog()
+    assert dlg.unit_combo.currentText() == "in"
+    assert dlg.width_spin.value() == 16.0
+    assert dlg.height_spin.value() == 20.0
+
+
+def test_size_seeds_from_the_preferred_unit_converting_the_same_physical_size(
+    clean_templates, clean_settings
+):
+    user_settings.set_default_unit("cm")
+
+    dlg = NewProjectDialog()
+
+    assert dlg.unit_combo.currentText() == "cm"
+    # 16x20in converted to cm, not the raw 16/20 numbers reinterpreted as
+    # cm (which would be a tiny ~6x8in canvas instead of the intended
+    # 16x20in default just shown in a different unit).
+    assert dlg.width_spin.value() == pytest.approx(40.64, abs=0.01)
+    assert dlg.height_spin.value() == pytest.approx(50.8, abs=0.01)
 
 
 def test_template_section_visible_and_populated_with_saved_templates(clean_templates):

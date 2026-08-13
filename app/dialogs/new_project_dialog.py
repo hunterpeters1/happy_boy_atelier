@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from .. import constants as C
 from .. import project_templates
+from .. import settings as user_settings
 from ..project import CanvasSpec
 
 _CATEGORIES = {
@@ -116,12 +117,19 @@ class NewProjectDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        # Seeded from the data model's own default — not a second,
-        # independently-chosen number that can drift out of sync with it.
+        # Width/height are seeded from the data model's own default (not
+        # a second, independently-chosen number that can drift out of
+        # sync with it) — but the *unit* they're shown in respects the
+        # artist's preference (Options > Settings…, app/settings.py),
+        # converting the same physical size into that unit rather than
+        # reinterpreting the raw numbers in a different unit (16x20
+        # shown as "cm" would be a tiny ~6x8in canvas, not the intended
+        # 16x20in default just relabeled).
         default = CanvasSpec()
-        self.width_spin.setValue(default.width)
-        self.height_spin.setValue(default.height)
-        self.unit_combo.setCurrentText(default.unit)
+        preferred_unit = user_settings.default_unit()
+        self.width_spin.setValue(C.from_inches(default.width_in, preferred_unit))
+        self.height_spin.setValue(C.from_inches(default.height_in, preferred_unit))
+        self.unit_combo.setCurrentText(preferred_unit)
 
         self._show_presets("Portrait")
 

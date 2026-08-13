@@ -653,11 +653,56 @@ format choice. Same JSON-string-in-`QSettings` storage as export presets.
 
 A `QDialog` styled entirely via `theme.py`'s existing global `QDialog`
 rule (no bespoke stylesheet), replacing the previous plain
-`QMessageBox.about()` call from `MainWindow._show_about()` (Help menu).
-Shows the app icon (`resources.app_icon_path()`), name/version from
-`constants.py`, the mission line, and credits — a pre-`MainWindow` launch
-splash screen was explicitly scoped out as real added complexity for a
-fast-starting desktop app.
+`QMessageBox.about()` call from `MainWindow._show_about()` (Options
+menu — see below for why it's not called Help). Shows the app icon
+(`resources.app_icon_path()`), name/version from `constants.py`, the
+mission line, and credits — a pre-`MainWindow` launch splash screen was
+explicitly scoped out as real added complexity for a fast-starting
+desktop app.
+
+## Options menu and Settings (`app/settings.py`, `app/dialogs/settings_dialog.py`)
+
+The menu conventionally named "Help" is `&Options` here instead
+(`MainWindow._build_menu_and_toolbar()`) — this app's Help-equivalent
+menu was never really a documentation-lookup menu (there's no help
+content to look up); it's this app's one catch-all for app-level, not
+project-level, actions: Settings, the phone uploader, and app identity.
+
+`app/settings.py` holds four standard, low-risk preferences — autosave
+interval (with a 0 sentinel for "off," never handed to
+`QTimer.setInterval()` directly, since a real 0ms interval would fire
+continuously), default unit for New Painting, default export DPI, and
+whether new windows show rulers by default. Persisted as plain scalar
+`QSettings` keys (`settings/autosaveIntervalMs` etc.), not the
+JSON-blob-in-one-key pattern `project_templates.py`/`export_dialog.py`'s
+presets need — those exist to reliably round-trip nested dict/bool
+structures across `QSettings` backends, which a single scalar doesn't
+need. Every getter validates and falls back to the historical default on
+a missing/corrupt/out-of-range value (never trusts a raw `QSettings`
+read blindly) — same defensive posture `project_templates.py`'s
+`_load_templates()` already takes for a corrupt index.
+
+Deliberately **not** project state: nothing here is saved into any
+`.atelier` file, none of it is undoable, and none of it retroactively
+touches an already-open project or an already-built dialog — each
+preference only seeds a *default* the next time it's relevant:
+`NewProjectDialog` reads `settings.default_unit()` once at construction,
+converting `CanvasSpec()`'s own default physical size (16×20 real
+inches) into that unit via `constants.from_inches()` rather than
+reinterpreting the raw 16/20 numbers in a different unit (which would
+silently shrink the intended default canvas to a tiny ~6×8in-equivalent
+if the preferred unit were, say, cm); `ExportDialog` reads
+`settings.default_export_dpi()` the same way. The one preference that
+*does* need live re-application is autosave, since it drives an
+already-running `QTimer` on the one persistent `MainWindow` — accepting
+`SettingsDialog` calls `MainWindow._apply_autosave_interval()`
+immediately afterward, the same method `__init__` calls at startup, so
+a changed interval (or turning autosave off) takes effect without a
+restart.
+
+`SettingsDialog` follows `NewProjectDialog`/`ExportDialog`'s own
+accept/reject convention: fields seed from current settings, and only
+Save (not Cancel) writes anything back.
 
 ## Current scope
 

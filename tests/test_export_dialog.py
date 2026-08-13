@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest
 from PySide6.QtCore import QSettings
 
+from app import settings as user_settings
 from app.dialogs.export_dialog import ExportDialog, _PRESETS_SETTINGS_KEY, _load_presets
 
 
@@ -26,6 +27,13 @@ def clean_export_presets(qapp):
     QSettings().remove(_PRESETS_SETTINGS_KEY)
 
 
+@pytest.fixture
+def clean_settings(qapp):
+    QSettings().remove("settings/defaultExportDpi")
+    yield
+    QSettings().remove("settings/defaultExportDpi")
+
+
 def _dialog(clean_export_presets) -> ExportDialog:
     return ExportDialog("My Painting", Path("/tmp"))
 
@@ -34,6 +42,17 @@ def test_fresh_dialog_has_only_the_none_preset(clean_export_presets):
     dlg = _dialog(clean_export_presets)
     assert [dlg.preset_combo.itemText(i) for i in range(dlg.preset_combo.count())] == ["(none)"]
     assert dlg.delete_preset_btn.isEnabled() is False
+
+
+def test_dpi_defaults_to_300_when_no_preference_set(clean_export_presets, clean_settings):
+    dlg = _dialog(clean_export_presets)
+    assert dlg.dpi() == 300
+
+
+def test_dpi_seeds_from_the_preferred_default(clean_export_presets, clean_settings):
+    user_settings.set_default_export_dpi(150)
+    dlg = _dialog(clean_export_presets)
+    assert dlg.dpi() == 150
 
 
 def test_save_preset_persists_current_field_values(clean_export_presets, monkeypatch):
