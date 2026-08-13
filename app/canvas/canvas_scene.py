@@ -57,6 +57,11 @@ class CanvasScene(QGraphicsScene):
         # Desk color behind the canvas rect — defaults to COLOR_CANVAS_BG
         # for back-compat with older .atelier files that don't carry it.
         self._bg_color = bg_color or C.COLOR_CANVAS_BG
+        # Focus Mode's "clear desk" (see set_desk_transparent()) — a live
+        # rendering-only flag, never serialized and never touching
+        # _bg_color itself, so the project's own saved desk color is
+        # completely unaffected by entering/exiting Focus Mode.
+        self._desk_transparent = False
         w = canvas_spec.width_in * C.SCENE_PX_PER_INCH
         h = canvas_spec.height_in * C.SCENE_PX_PER_INCH
         self._canvas_rect = QRectF(0, 0, w, h)
@@ -188,7 +193,8 @@ class CanvasScene(QGraphicsScene):
         return self._canvas_rect
 
     def drawBackground(self, painter, rect) -> None:
-        painter.fillRect(rect, QColor(self._bg_color))
+        if not self._desk_transparent:
+            painter.fillRect(rect, QColor(self._bg_color))
         shadow = self._canvas_rect.adjusted(6, 8, 6, 8)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(QColor(0, 0, 0, 90)))
@@ -226,6 +232,21 @@ class CanvasScene(QGraphicsScene):
         for view in self.views():
             if hasattr(view, "set_desk_color"):
                 view.set_desk_color(color)
+
+    def set_desk_transparent(self, transparent: bool) -> None:
+        """Focus Mode's "clear desk": when True, drawBackground() skips
+        the desk fill entirely, leaving those pixels unpainted so
+        MainWindow's WA_TranslucentBackground (toggled alongside this in
+        MainWindow.toggle_focus_mode()) lets the real desktop show through
+        them. The canvas rect itself — shadow, paper, rivets, every item
+        on it — always still paints opaquely on top; only the void beyond
+        the canvas goes see-through. Never touches _bg_color/set_bg_color,
+        so the project's own saved desk color is untouched by this.
+        """
+        self._desk_transparent = transparent
+        for view in self.views():
+            if hasattr(view, "set_desk_transparent"):
+                view.set_desk_transparent(transparent)
 
     # -- tools -----------------------------------------------------------
     def set_active_tool(self, tool: str | None) -> None:

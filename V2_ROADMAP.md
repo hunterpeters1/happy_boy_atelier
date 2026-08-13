@@ -89,8 +89,9 @@ originally written.)*
   investigated further and the conclusion changed: every *script* tried
   around the spec file got flagged/blocked by Windows on this machine, so
   the supported path is now deliberately a manual command sequence
-  (README's "Build a standalone .exe"), not a script. Revisit only if
-  that changes (see Section 7's packaging note).
+  (`HappyBoyAtelier.spec` + `requirements-build.txt`, see `CLAUDE.md`),
+  not a script. Revisit only if that changes (see Section 7's packaging
+  note).
 
 ### What should be removed
 
