@@ -91,14 +91,17 @@ design rationale. Landed in phases.
   plain `QMessageBox.about()` call.
 
 ### Post-launch refinement
-- **Focus Mode now clears the desk, too** — entering Focus Mode drops the
-  desk color (the void behind the canvas) to pure black for the duration,
-  regardless of the painting's own saved desk color or active theme, so
-  nothing competes with the arrangement itself. A new **Window Opacity**
-  slider in the status bar (Focus Mode only) lets you see through the
-  whole app to whatever's behind it on screen. Both are pure session
-  state — neither touches the project's saved desk color, and both reset
-  automatically on exit.
+- **Focus Mode's desk is now truly transparent** — entering Focus Mode
+  makes the void behind the canvas a real see-through hole to the
+  desktop (not a fill color, and not black), regardless of the
+  painting's own saved desk color or active theme, while the painting
+  itself stays fully opaque and visible. A **Window Opacity** slider in
+  the status bar (Focus Mode only) is a separate, complementary control
+  that dims the whole window — chrome and canvas alike — if you want to
+  see through more than just the desk. Both are pure session state —
+  neither touches the project's saved desk color, and both reset
+  automatically on exit. (An earlier version of this dropped the desk to
+  pure black instead of making it transparent; changed after review.)
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

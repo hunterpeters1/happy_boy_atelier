@@ -78,12 +78,6 @@ class MainWindow(QMainWindow):
         self._focus_mode = False
         self._pre_focus_dock_visible: dict[int, bool] = {}
         self._pre_focus_toolbar_visible = True
-        # The desk color (void behind the canvas) is per-project workflow
-        # state (self.meta.bg_color, see _change_desk_color()) -- Focus
-        # Mode never touches that saved preference, only the scene's live
-        # _bg_color for the duration of the mode, snapshotting it here the
-        # same way dock visibility is snapshotted above.
-        self._pre_focus_bg_color: str | None = None
 
         # The Library dock is cross-project (app/library.py) and, unlike
         # layers/properties/swatches, is built once here rather than
@@ -532,23 +526,27 @@ class MainWindow(QMainWindow):
         Project/Library are each tabified pairs — only one of a pair may
         have actually been visible/active going in.
 
-        Also drops the desk color (the void behind the canvas rect) to
-        pure black for the duration, so a project's own chosen desk color
-        can't compete for attention with the arrangement itself. This is a
-        deliberate, scoped exception to themes.py's own Light-mode
-        rationale ("pitch black would fight the whole point of a light
-        theme") — that comment is about ordinary editing, where the desk
-        is part of the visible chrome; Focus Mode's entire premise is
-        removing everything but the arrangement, so the same pitch-black
-        void Dark/Hack already default to is correct here regardless of
-        which theme is active, not an oversight of that rule. Also reveals
-        a window-opacity slider (status bar) so the artist can see through
-        the whole app to whatever's behind it on screen — genuinely
-        PureRef-like, but scoped to Focus Mode only rather than adopted as
-        this app's permanent chrome. Both are pure session/workflow state,
-        same as dock visibility above: never touches self.meta.bg_color
-        (the project's saved desk color) and
-        never persists the opacity value.
+        Also makes the desk (the void behind the canvas rect) truly
+        transparent for the duration — a real see-through hole to the
+        actual desktop, not a fill color — so nothing about the project's
+        own desk color or the active theme competes with the arrangement
+        itself. The canvas rect and everything on it (paper, shadow,
+        rivets, every placed item) keeps painting fully opaque as always;
+        only the void beyond it goes clear. This needs
+        Qt.WA_TranslucentBackground on the top-level window itself
+        (toggled here alongside CanvasScene.set_desk_transparent(), see
+        that method) — per Qt's own docs this attribute is most reliable
+        set before a widget is first shown, so toggling it at runtime like
+        this is a known platform risk worth re-checking if it doesn't take
+        effect on a given system. Also reveals a window-opacity slider
+        (status bar) — a separate, complementary control: the slider dims
+        the whole window (chrome and canvas alike) uniformly, while the
+        desk stays a clean hole regardless of where the slider sits.
+        Genuinely PureRef-like, but scoped to Focus Mode only rather than
+        adopted as this app's permanent chrome. Both are pure
+        session/workflow state, same as dock visibility above: neither
+        touches self.meta.bg_color (the project's saved desk color), and
+        neither persists past the toggle.
         """
         docks = [self.layers_dock, self.properties_dock, self.swatches_dock, self.library_dock]
         if entering:
@@ -558,9 +556,9 @@ class MainWindow(QMainWindow):
                 if dock is not None:
                     dock.setVisible(False)
             self.toolbar.setVisible(False)
+            self.setAttribute(Qt.WA_TranslucentBackground, True)
             if self.scene is not None:
-                self._pre_focus_bg_color = self.scene._bg_color
-                self.scene.set_bg_color("#000000")
+                self.scene.set_desk_transparent(True)
             self.focus_opacity_label.setVisible(True)
             self.focus_opacity_slider.setVisible(True)
             self.statusBar().showMessage("Focus Mode — Ctrl+Shift+F to exit", 0)
@@ -569,9 +567,9 @@ class MainWindow(QMainWindow):
                 if dock is not None:
                     dock.setVisible(self._pre_focus_dock_visible.get(id(dock), True))
             self.toolbar.setVisible(self._pre_focus_toolbar_visible)
-            if self.scene is not None and self._pre_focus_bg_color is not None:
-                self.scene.set_bg_color(self._pre_focus_bg_color)
-            self._pre_focus_bg_color = None
+            if self.scene is not None:
+                self.scene.set_desk_transparent(False)
+            self.setAttribute(Qt.WA_TranslucentBackground, False)
             self.focus_opacity_label.setVisible(False)
             self.focus_opacity_slider.setVisible(False)
             # setValue(100) only fires valueChanged (and so only resets

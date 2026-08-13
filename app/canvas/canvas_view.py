@@ -262,6 +262,28 @@ class CanvasView(QGraphicsView):
         self.setBackgroundBrush(QColor(color))
         self.viewport().update()
 
+    def set_desk_transparent(self, transparent: bool) -> None:
+        """See CanvasScene.set_desk_transparent(). This view's own
+        backgroundBrush only ever paints the sliver beyond the scene's own
+        padded rect (CanvasScene.drawBackground() handles the visible desk
+        itself), but it still needs clearing here too, plus the viewport
+        widget's own opaque auto-fill disabled — otherwise the viewport
+        would repaint an opaque backdrop under the scene before
+        drawBackground() ever gets a chance to leave those pixels
+        transparent.
+        """
+        if transparent:
+            self.setBackgroundBrush(Qt.NoBrush)
+            self.viewport().setAttribute(Qt.WA_TranslucentBackground, True)
+            self.viewport().setAutoFillBackground(False)
+        else:
+            scene = self.scene()
+            bg = getattr(scene, "_bg_color", C.COLOR_CANVAS_BG) if scene else C.COLOR_CANVAS_BG
+            self.setBackgroundBrush(QColor(bg))
+            self.viewport().setAttribute(Qt.WA_TranslucentBackground, False)
+            self.viewport().setAutoFillBackground(True)
+        self.viewport().update()
+
     # -- ruler overlay ----------------------------------------------------
     def set_ruler_visible(self, visible: bool) -> None:
         self._show_ruler = visible

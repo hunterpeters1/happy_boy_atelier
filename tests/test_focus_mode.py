@@ -11,6 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from PySide6.QtCore import Qt
+
 from app.main_window import MainWindow
 
 
@@ -53,20 +55,45 @@ def test_focus_mode_restores_prior_dock_visibility_exactly(qapp):
     assert win.swatches_dock.isVisible() is True
 
 
-def test_focus_mode_drops_desk_color_to_black_and_restores_it(qapp):
+def test_focus_mode_makes_desk_transparent_and_restores_it(qapp):
     win = _window(qapp)
     win.meta.bg_color = "#336699"
     win.scene.set_bg_color(win.meta.bg_color)
 
     win.focus_mode_action.trigger()  # enter
-    assert win.scene._bg_color == "#000000"
-    # The project's own saved preference is untouched -- only the live
-    # scene color changes for the duration of Focus Mode.
+    assert win.scene._desk_transparent is True
+    assert win.testAttribute(Qt.WA_TranslucentBackground) is True
+    # Neither the live scene color nor the project's own saved preference
+    # is touched -- set_desk_transparent() is a separate rendering flag,
+    # not a color override.
+    assert win.scene._bg_color == "#336699"
     assert win.meta.bg_color == "#336699"
 
     win.focus_mode_action.trigger()  # exit
+    assert win.scene._desk_transparent is False
+    assert win.testAttribute(Qt.WA_TranslucentBackground) is False
     assert win.scene._bg_color == "#336699"
     assert win.meta.bg_color == "#336699"
+
+
+def test_focus_mode_clears_the_view_and_viewport_for_transparency(qapp):
+    """The actual see-through mechanism has three moving parts beyond the
+    scene flag itself: the view's own fallback background brush, and the
+    viewport widget's translucency attribute + auto-fill, both of which
+    would otherwise repaint an opaque backdrop under the scene before
+    drawBackground() gets a chance to leave those pixels untouched.
+    """
+    win = _window(qapp)
+
+    win.focus_mode_action.trigger()  # enter
+    assert win.view.backgroundBrush().style() == Qt.NoBrush
+    assert win.view.viewport().testAttribute(Qt.WA_TranslucentBackground) is True
+    assert win.view.viewport().autoFillBackground() is False
+
+    win.focus_mode_action.trigger()  # exit
+    assert win.view.backgroundBrush().style() != Qt.NoBrush
+    assert win.view.viewport().testAttribute(Qt.WA_TranslucentBackground) is False
+    assert win.view.viewport().autoFillBackground() is True
 
 
 def test_focus_mode_shows_opacity_slider_and_resets_it_on_exit(qapp):

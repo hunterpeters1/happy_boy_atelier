@@ -171,10 +171,12 @@ automatically.
   also carry trim marks and a readout of the canvas's real dimensions.
 - **Focus Mode** — View > Focus Mode (Ctrl+Shift+F) hides the toolbar and
   every dock so only the canvas remains, for stepping back and just
-  looking at the arrangement. The desk goes black for the duration, and
-  a **Window Opacity** slider appears in the status bar so you can see
-  through the app to whatever's behind it. Everything restores exactly
-  on exit.
+  looking at the arrangement. The desk goes fully transparent for the
+  duration — a real window into whatever's behind the app, not a fill
+  color — while the painting itself stays fully visible. A **Window
+  Opacity** slider also appears in the status bar, dimming the whole
+  window (painting included) if you want to see through more than just
+  the desk. Everything restores exactly on exit.
 - **Desk Color** — View > Change Desk Color… sets the void behind the
   canvas, saved per project.
 

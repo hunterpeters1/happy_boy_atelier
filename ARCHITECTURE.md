@@ -254,18 +254,45 @@ drift from the geometry.
   one may have been the visible/active tab going in). The structural
   lesson taken from PureRef's canvas-first identity without adopting its
   chrome-less floating-window model, which doesn't fit this app's docked,
-  project-based shape. Also snapshots the scene's live `_bg_color` and
-  drops the desk to pure black for the duration via the same
-  `CanvasScene.set_bg_color()` "Change Desk Color…" already uses —
-  deliberately overriding themes.py's Light-mode "keep a light desk"
-  rationale, since that rationale is about ordinary editing chrome and
-  Focus Mode's whole point is removing everything but the arrangement —
-  plus reveals a status-bar window-opacity slider
-  (`MainWindow.focus_opacity_slider`, `QWidget.setWindowOpacity()`) so the
-  artist can see through the app to whatever's behind it on screen.
-  Neither touches `self.meta.bg_color` (the project's saved desk color)
-  and neither persists past the toggle — both reset on exit, same
-  session-only footing as dock visibility.
+  project-based shape.
+
+  Also makes the desk truly transparent for the duration — a real
+  per-pixel hole through to the desktop, not a fill color — via
+  `CanvasScene.set_desk_transparent()` (`app/canvas/canvas_scene.py`):
+  `drawBackground()` skips its desk `fillRect()` call entirely when the
+  flag is set, leaving those pixels unpainted; the canvas rect and
+  everything on it (paper, shadow, rivets, every placed item) keeps
+  painting fully opaque underneath regardless, so only the void goes
+  clear. Getting an actual hole requires three things to line up: (1)
+  `MainWindow` gets `Qt.WA_TranslucentBackground` toggled on the
+  top-level window itself, enabling per-pixel alpha compositing at all;
+  (2) `CanvasView.set_desk_transparent()` (`app/canvas/canvas_view.py`)
+  clears its own fallback `backgroundBrush` (used only for the sliver
+  beyond the scene's padded rect) to `Qt.NoBrush`; (3) the same method
+  also sets `WA_TranslucentBackground` and disables `autoFillBackground`
+  on the view's *viewport* widget specifically, since it would otherwise
+  auto-paint an opaque backdrop before the scene's own `drawBackground()`
+  gets a chance to leave the desk area untouched. The menu bar and status
+  bar stay solid throughout, since both carry an explicit `background:`
+  rule in `theme.py`'s stylesheet, which Qt still paints opaquely
+  regardless of the top-level window's translucency attribute. Per Qt's
+  own docs, `WA_TranslucentBackground` is most reliable when set before a
+  widget's first `show()` — toggling it at runtime on an already-shown
+  window (unavoidable here, since Focus Mode is a live toggle on the
+  app's one persistent `MainWindow`) is a known platform-dependent risk
+  worth re-verifying if it doesn't take effect on a given system.
+
+  Also reveals a status-bar window-opacity slider
+  (`MainWindow.focus_opacity_slider`, `QWidget.setWindowOpacity()`) — a
+  separate, complementary control from the desk transparency above: the
+  slider uniformly dims the *entire* window, chrome and canvas alike,
+  while the desk stays a clean hole regardless of where the slider sits.
+
+  Neither the transparency flag nor the opacity slider touches
+  `self.meta.bg_color` (the project's saved desk color, `_change_desk_color()`)
+  or `CanvasScene._bg_color` itself, and neither persists past the
+  toggle — both reset on exit, same session-only footing as dock
+  visibility.
 
 Projector mode (a separate fullscreen tracing-aid window) existed here
 through the UX redesign below but has been removed entirely, along with
