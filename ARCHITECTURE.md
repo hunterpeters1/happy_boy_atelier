@@ -254,7 +254,18 @@ drift from the geometry.
   one may have been the visible/active tab going in). The structural
   lesson taken from PureRef's canvas-first identity without adopting its
   chrome-less floating-window model, which doesn't fit this app's docked,
-  project-based shape.
+  project-based shape. Also snapshots the scene's live `_bg_color` and
+  drops the desk to pure black for the duration via the same
+  `CanvasScene.set_bg_color()` "Change Desk Color…" already uses —
+  deliberately overriding themes.py's Light-mode "keep a light desk"
+  rationale, since that rationale is about ordinary editing chrome and
+  Focus Mode's whole point is removing everything but the arrangement —
+  plus reveals a status-bar window-opacity slider
+  (`MainWindow.focus_opacity_slider`, `QWidget.setWindowOpacity()`) so the
+  artist can see through the app to whatever's behind it on screen.
+  Neither touches `self.meta.bg_color` (the project's saved desk color)
+  and neither persists past the toggle — both reset on exit, same
+  session-only footing as dock visibility.
 
 Projector mode (a separate fullscreen tracing-aid window) existed here
 through the UX redesign below but has been removed entirely, along with

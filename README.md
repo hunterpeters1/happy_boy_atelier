@@ -286,7 +286,12 @@ needed.
   every dock so only the canvas (and the menu bar) remain, for stepping
   back and just looking at the arrangement. Exiting restores every panel
   to exactly the visibility it had going in — a panel you'd already
-  closed stays closed, nothing gets blanket-reshown.
+  closed stays closed, nothing gets blanket-reshown. The desk color also
+  drops to pure black for the duration regardless of your chosen
+  painting's own desk color or app theme, so nothing competes with the
+  arrangement itself; a **Window Opacity** slider appears in the status
+  bar so you can see through the whole app to whatever's behind it on
+  screen. Both reset automatically on exit — neither is saved anywhere.
 - **Desk Color** — View > Change Desk Color… opens a color picker for the
   void behind the canvas rect (the "desk" the painting sits on). Per-project
   and saved in the .atelier file — each painting can have a different desk

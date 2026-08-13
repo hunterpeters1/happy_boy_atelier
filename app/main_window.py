@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QSlider,
     QToolBar,
 )
 
@@ -77,6 +78,12 @@ class MainWindow(QMainWindow):
         self._focus_mode = False
         self._pre_focus_dock_visible: dict[int, bool] = {}
         self._pre_focus_toolbar_visible = True
+        # The desk color (void behind the canvas) is per-project workflow
+        # state (self.meta.bg_color, see _change_desk_color()) -- Focus
+        # Mode never touches that saved preference, only the scene's live
+        # _bg_color for the duration of the mode, snapshotting it here the
+        # same way dock visibility is snapshotted above.
+        self._pre_focus_bg_color: str | None = None
 
         # The Library dock is cross-project (app/library.py) and, unlike
         # layers/properties/swatches, is built once here rather than
@@ -112,6 +119,31 @@ class MainWindow(QMainWindow):
         self.status_lock_banner.setVisible(False)
         self.statusBar().addPermanentWidget(self.status_lock_banner)
         self.statusBar().addWidget(self.status_hint)
+
+        # Focus Mode's window-opacity slider — permanent widgets (unlike
+        # status_hint above, added via addWidget) stay visible even while
+        # toggle_focus_mode()'s showMessage() call is showing its "Ctrl+
+        # Shift+F to exit" hint in the temporary-message area, which is
+        # exactly why this needs addPermanentWidget rather than addWidget.
+        # Hidden outside Focus Mode; never persisted (see toggle_focus_mode).
+        self.focus_opacity_label = QLabel("Window Opacity")
+        self.focus_opacity_label.setProperty("role", "hint")
+        self.focus_opacity_label.setVisible(False)
+        self.focus_opacity_slider = QSlider(Qt.Horizontal)
+        # Floor of 20%, not 0 -- a fully (or near-fully) invisible window
+        # has no way to be brought back short of blindly hunting for the
+        # taskbar/alt-tab entry with no visual feedback at all.
+        self.focus_opacity_slider.setRange(20, 100)
+        self.focus_opacity_slider.setValue(100)
+        self.focus_opacity_slider.setFixedWidth(120)
+        self.focus_opacity_slider.setToolTip(
+            "Window opacity while in Focus Mode — lower it to see through "
+            "the app to whatever's behind it on screen."
+        )
+        self.focus_opacity_slider.setVisible(False)
+        self.focus_opacity_slider.valueChanged.connect(lambda v: self.setWindowOpacity(v / 100.0))
+        self.statusBar().addPermanentWidget(self.focus_opacity_label)
+        self.statusBar().addPermanentWidget(self.focus_opacity_slider)
 
         self._build_menu_and_toolbar()
         self._set_hack_mode_active(self._theme_mode == themes.ThemeMode.HACK)
@@ -499,6 +531,24 @@ class MainWindow(QMainWindow):
         exactly, not blanket-reshown, since Properties/Swatches and
         Project/Library are each tabified pairs — only one of a pair may
         have actually been visible/active going in.
+
+        Also drops the desk color (the void behind the canvas rect) to
+        pure black for the duration, so a project's own chosen desk color
+        can't compete for attention with the arrangement itself. This is a
+        deliberate, scoped exception to themes.py's own Light-mode
+        rationale ("pitch black would fight the whole point of a light
+        theme") — that comment is about ordinary editing, where the desk
+        is part of the visible chrome; Focus Mode's entire premise is
+        removing everything but the arrangement, so the same pitch-black
+        void Dark/Hack already default to is correct here regardless of
+        which theme is active, not an oversight of that rule. Also reveals
+        a window-opacity slider (status bar) so the artist can see through
+        the whole app to whatever's behind it on screen — genuinely
+        PureRef-like, but scoped to Focus Mode only rather than adopted as
+        this app's permanent chrome. Both are pure session/workflow state,
+        same as dock visibility above: never touches self.meta.bg_color
+        (the project's saved desk color) and
+        never persists the opacity value.
         """
         docks = [self.layers_dock, self.properties_dock, self.swatches_dock, self.library_dock]
         if entering:
@@ -508,12 +558,28 @@ class MainWindow(QMainWindow):
                 if dock is not None:
                     dock.setVisible(False)
             self.toolbar.setVisible(False)
+            if self.scene is not None:
+                self._pre_focus_bg_color = self.scene._bg_color
+                self.scene.set_bg_color("#000000")
+            self.focus_opacity_label.setVisible(True)
+            self.focus_opacity_slider.setVisible(True)
             self.statusBar().showMessage("Focus Mode — Ctrl+Shift+F to exit", 0)
         else:
             for dock in docks:
                 if dock is not None:
                     dock.setVisible(self._pre_focus_dock_visible.get(id(dock), True))
             self.toolbar.setVisible(self._pre_focus_toolbar_visible)
+            if self.scene is not None and self._pre_focus_bg_color is not None:
+                self.scene.set_bg_color(self._pre_focus_bg_color)
+            self._pre_focus_bg_color = None
+            self.focus_opacity_label.setVisible(False)
+            self.focus_opacity_slider.setVisible(False)
+            # setValue(100) only fires valueChanged (and so only resets
+            # setWindowOpacity) if the slider wasn't already at 100 --
+            # setWindowOpacity(1.0) below is the actual reset guarantee,
+            # not a side effect of this line.
+            self.focus_opacity_slider.setValue(100)
+            self.setWindowOpacity(1.0)
             self.statusBar().clearMessage()
         self._focus_mode = entering
         if self.focus_mode_action.isChecked() != entering:

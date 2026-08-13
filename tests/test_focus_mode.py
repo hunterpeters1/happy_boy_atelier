@@ -51,3 +51,41 @@ def test_focus_mode_restores_prior_dock_visibility_exactly(qapp):
     assert win.layers_dock.isVisible() is True
     assert win.properties_dock.isVisible() is False
     assert win.swatches_dock.isVisible() is True
+
+
+def test_focus_mode_drops_desk_color_to_black_and_restores_it(qapp):
+    win = _window(qapp)
+    win.meta.bg_color = "#336699"
+    win.scene.set_bg_color(win.meta.bg_color)
+
+    win.focus_mode_action.trigger()  # enter
+    assert win.scene._bg_color == "#000000"
+    # The project's own saved preference is untouched -- only the live
+    # scene color changes for the duration of Focus Mode.
+    assert win.meta.bg_color == "#336699"
+
+    win.focus_mode_action.trigger()  # exit
+    assert win.scene._bg_color == "#336699"
+    assert win.meta.bg_color == "#336699"
+
+
+def test_focus_mode_shows_opacity_slider_and_resets_it_on_exit(qapp):
+    win = _window(qapp)
+    assert win.focus_opacity_slider.isHidden()
+
+    win.focus_mode_action.trigger()  # enter
+    assert not win.focus_opacity_slider.isHidden()
+    assert not win.focus_opacity_label.isHidden()
+
+    win.focus_opacity_slider.setValue(50)
+    # The offscreen QPA platform quantizes window opacity to 8-bit
+    # precision internally (confirmed: reads back ~0.498 for 0.5, not
+    # exactly 0.5) -- a real platform applies it exactly, so this only
+    # needs to confirm setWindowOpacity was actually driven by the slider.
+    assert abs(win.windowOpacity() - 0.5) < 0.01
+
+    win.focus_mode_action.trigger()  # exit
+    assert win.focus_opacity_slider.isHidden()
+    assert win.focus_opacity_label.isHidden()
+    assert win.focus_opacity_slider.value() == 100
+    assert win.windowOpacity() == 1.0

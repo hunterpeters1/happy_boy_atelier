@@ -90,6 +90,16 @@ design rationale. Landed in phases.
   before you touch the canvas" mission line, credits) replacing the old
   plain `QMessageBox.about()` call.
 
+### Post-launch refinement
+- **Focus Mode now clears the desk, too** — entering Focus Mode drops the
+  desk color (the void behind the canvas) to pure black for the duration,
+  regardless of the painting's own saved desk color or active theme, so
+  nothing competes with the arrangement itself. A new **Window Opacity**
+  slider in the status bar (Focus Mode only) lets you see through the
+  whole app to whatever's behind it on screen. Both are pure session
+  state — neither touches the project's saved desk color, and both reset
+  automatically on exit.
+
 ## Unreleased — UX redesign ("Studio, Not Software")
 
 A ground-up interaction and visual-design pass, driven by a full-source
