@@ -108,6 +108,34 @@ design rationale. Landed in phases.
   only reliable when set before the window's native handle exists. It's
   now set once, permanently, at startup instead, with no visible effect
   outside Focus Mode.
+- **Phone uploads now flow straight into the Reference Library, live** —
+  photos sent through the `uploader/` tool land in the library
+  automatically, usually within a couple of seconds, no manual import
+  step. **Options > Upload From Phone…** also starts the uploader itself
+  and shows the QR code/URL/PIN right in the app, so a terminal + separate
+  venv activation is no longer required for day-to-day use (the manual
+  `python app.py` path still works exactly as before, unaffected).
+- **The phone uploader's web page has a proper look now** — same
+  brass/graphite palette as the desktop app instead of a generic dark-mode
+  blue accent, tying it visibly to the rest of the product. Purely visual;
+  no behavior changed.
+- **The Help menu is now Options, and it has real Settings** — renamed
+  since this menu was never really documentation-lookup content, it's
+  this app's one catch-all for app-level (not project-level) actions.
+  **Options > Settings…** exposes four standard preferences: autosave
+  interval (or off entirely), the unit New Painting starts with, the DPI
+  Export starts with, and whether new windows show rulers by default.
+  None of this is project state — nothing here is saved into any
+  painting, and each preference only seeds a default the next time it's
+  relevant (autosave is the one exception: turning it off or changing
+  the interval takes effect immediately, since it drives an
+  already-running timer).
+- **Reference images magnetically snap to level/90°/180°/270° while
+  rotating** — a default (no-modifier) drag now catches the nearest
+  cardinal orientation when you're already close to it, for squaring up
+  a photo without fighting a fiddly freehand angle. Independent of the
+  existing Shift-held hard snap to 15° increments, which is unchanged;
+  hold **Alt** to rotate with no snapping at all.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

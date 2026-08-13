@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, QSize, Qt, Signal, QUrl
+from PySide6.QtCore import QMimeData, QSize, Qt, QTimer, Signal, QUrl
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -36,6 +36,12 @@ from .. import icons
 from .. import library
 
 _THUMB_PX = 96
+# How often to check uploader/photos/ for new phone uploads (see
+# library.sync_from_uploader()). A plain directory listing + set lookup
+# is cheap enough that a short interval costs nothing noticeable, and a
+# few seconds reads as "live" for someone watching photos land while
+# uploading from their phone -- see _poll_for_uploads().
+_UPLOAD_POLL_INTERVAL_MS = 3000
 
 
 class _LibraryList(QListWidget):
@@ -101,6 +107,19 @@ class LibraryPanel(QWidget):
 
         self.refresh()
 
+        # Phone uploads (Help > Upload From Phone…, app/library.py's
+        # sync_from_uploader()) land on disk from a separate process --
+        # nothing here would otherwise know a new photo arrived. Polling
+        # is simpler and more robust than a QFileSystemWatcher for this:
+        # uploader/photos/ may not exist yet the first time this panel is
+        # built (the uploader creates it lazily, on its own first run),
+        # and a watcher would need extra handling for "start watching once
+        # the directory appears" that a timer just doesn't need.
+        self._upload_poll_timer = QTimer(self)
+        self._upload_poll_timer.setInterval(_UPLOAD_POLL_INTERVAL_MS)
+        self._upload_poll_timer.timeout.connect(self._poll_for_uploads)
+        self._upload_poll_timer.start()
+
     # -- structural rebuild -------------------------------------------------
     def refresh(self) -> None:
         self.list.clear()
@@ -125,6 +144,11 @@ class LibraryPanel(QWidget):
             row = self.list.item(i)
             match = not text or text in row.text().lower()
             row.setHidden(not match)
+
+    # -- live phone-upload sync ----------------------------------------------
+    def _poll_for_uploads(self) -> None:
+        if library.sync_from_uploader():
+            self.refresh()
 
     # -- adding / removing --------------------------------------------------
     def _add_images(self) -> None:

@@ -62,7 +62,9 @@ something and not finding it up top.
   separate from any single project file. Add images with the library's
   own button, then drag or double-click a thumbnail to bring it into the
   current painting. Searchable by name; remove an entry without touching
-  the original file on disk.
+  the original file on disk. Photos sent from **Options > Upload From
+  Phone…** (see below) appear here automatically, live, with no import
+  step needed.
 
 ### Reference images
 
@@ -76,8 +78,11 @@ Each imported photo is its own object:
   so common actions stay close at hand.
 - **Resize** via the corner handles — free by default, hold **Shift** to
   lock the aspect ratio.
-- **Rotate** via the handle above the image; hold **Shift** to snap to
-  15° increments.
+- **Rotate** via the handle above the image; snaps to level/90°/180°/270°
+  when you get close, for squaring up a photo without fighting a fiddly
+  freehand angle. Hold **Shift** for a hard snap to 15° increments
+  instead (finer control); hold **Alt** to rotate completely freely with
+  no snapping at all.
 - **Crop** by dragging any edge handle inward — no separate crop mode.
   Properties panel has a "Reset Crop" button to undo it.
 - **Flip Horizontal / Vertical** — right-click, or Edit menu.
@@ -215,13 +220,36 @@ and updated live as you change format:
 View > Appearance offers Light, Dark, Current (matches OS), and Hack
 Mode, a developer theme with extra debug tools.
 
-**Help > About Happy Boy Atelier** shows the app's version and mission
-statement.
+### Options
+
+- **Options > Settings…** — a few standard defaults you can customize:
+  autosave interval (or turn it off entirely), the unit New Painting
+  starts with, the DPI Export starts with, and whether new windows show
+  rulers by default. All four are pure workflow preferences — nothing
+  here is saved into any painting, and changing one only affects what
+  happens *next* (a future New Painting, a future Export, a future
+  autosave tick), never anything already open or already exported.
+  Autosave changes take effect immediately; the others apply the next
+  time that dialog/window opens.
+- **Options > Upload From Phone…** — see below.
+- **Options > About Happy Boy Atelier** shows the app's version and
+  mission statement.
 
 ## Upload from phone
 
-`uploader/` is a small standalone tool for getting phone photos onto
-this machine over local WiFi, no app install required:
+The easiest way in: **Options > Upload From Phone…** starts the uploader
+for you and shows a QR code, URL, and one-time PIN right in the dialog —
+no terminal needed. Scan the QR (or type the URL) from a phone on the
+same WiFi network, enter the PIN, then upload photos through the
+browser. Each one lands in the **Reference Library** automatically,
+usually within a couple of seconds, whether or not this dialog is still
+open — closing it just stops the upload server. (First time only: this
+needs the uploader's own dependencies installed once — see below if it
+tells you they're missing.)
+
+If you'd rather run it by hand (or the in-app launcher can't find its
+dependencies yet), `uploader/` is also a small standalone tool with its
+own venv:
 
 ```
 cd uploader
@@ -231,13 +259,10 @@ pip install -r requirements.txt
 python app.py
 ```
 
-It prints a URL, a QR code, and a one-time PIN. Scan the QR (or type the
-URL) from a phone on the same WiFi network, enter the PIN, then upload
-photos through the browser — they land in `uploader/photos/` with a live
-gallery preview. HEIC/HEIF photos are automatically converted to JPEG.
-
-From there, bring photos into a project the normal way: File > Import
-Reference Image(s)…, pointed at `uploader/photos/`.
+It prints the same URL, QR code, and PIN to the terminal. Photos still
+land in `uploader/photos/` and sync into the Reference Library exactly
+the same way — the in-app launcher and the manual command are two doors
+into the same tool, not two different features.
 
 Note: this relies only on a one-time PIN for access, so it's meant for a
 trusted home network, not a public one. Both devices also need to be on

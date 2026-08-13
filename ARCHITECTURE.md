@@ -201,8 +201,24 @@ resize handles at the corners/edges of the item's bounding box plus one
 rotate handle above it. Dragging a corner updates a `QTransform` combining
 scale; dragging the rotate handle updates rotation around the item's
 center, snapping to 15° increments while Shift is held. This keeps
-"arrange references" feeling precise rather than fiddly. A plain body
-drag (not a handle drag) also snaps the image's center to the canvas
+"arrange references" feeling precise rather than fiddly.
+
+A *default* (no-modifier) rotate-handle drag additionally has its own
+lighter-touch snap: `ROTATION_MAGNETIC_SNAP_DEG` (`reference_layer.py`,
+`_update_handle_drag()`'s "rotate" branch) magnetically catches the
+nearest cardinal orientation (0/90/180/270 — any multiple of 90) when
+the drag is already within 4° of one, the same "on by default, Alt
+bypasses" posture `_snap_position()` uses for position dragging (see
+below), rather than a hard grid applied across the whole drag. Deliberately
+independent of Shift's own 15°-grid hard snap, which is unchanged and
+takes priority when held (both happen to agree at exact multiples of 90,
+since 90 is itself a multiple of 15, but a Shift-held drag can land on
+75°/105°/etc. that the default magnetic snap would never produce, and a
+default-only drag well away from a cardinal — e.g. 40° — snaps to
+neither). Scoped to reference images' own whole-item rotation only —
+`MeasurementItem`'s Shift-held endpoint-angle-around-pivot snap (see Two-point
+markers below) still only has the 15°-grid behavior, not this magnetic one.
+A plain body drag (not a handle drag) also snaps the image's center to the canvas
 center, to another visible reference image's center, or — only while the
 corresponding guide is actually turned on — to a Rule of Thirds/Golden
 Ratio intersection (`ReferenceImageItem._snap_position()` in
@@ -570,6 +586,69 @@ undo path. Double-clicking a thumbnail does the same import via
 `LibraryPanel.import_requested`, connected straight to
 `MainWindow._import_image_paths()`.
 
+## Phone upload integration (`app/dialogs/phone_upload_dialog.py`, `app/library.py`)
+
+`uploader/` (see its own module docstring) is a fully standalone Flask
+tool with its own venv/dependencies — that boundary is deliberate and
+this integration doesn't cross it. Two separate pieces bridge it to the
+main app without ever importing from it:
+
+- **Launching it** (Help > Upload From Phone…, non-modal — a modal
+  dialog would block watching the library update live, defeating the
+  point). `PhoneUploadDialog` locates the uploader's own venv Python
+  (`.venv/Scripts/python.exe`, falling back to a plain `venv/` name some
+  existing setups use) and starts `uploader/app.py` as a `QProcess`.
+  Since the uploader generates its own random PIN independently and has
+  no PySide6 dependency to report it back through, the dialog instead
+  *dictates* the PIN: it generates one itself and passes it via the
+  `HAPPY_BOY_UPLOADER_PIN` env var, which `uploader/app.py` reads
+  (falling back to its own random generation when unset, so a manual
+  `python app.py` run is completely unaffected). The LAN URL is computed
+  independently too, via the same UDP-socket "which interface would
+  reach the internet" trick `uploader/app.py`'s own `get_lan_ip()` uses,
+  duplicated rather than imported for the same standalone-boundary
+  reason. A real QR code image renders via `qrcode` + its pure-Python
+  `PyPNGImage` factory (no Pillow needed in the main app — the uploader
+  already depends on Pillow for its own thumbnailing, but that's a
+  separate venv). `QProcess` only reports "launched" vs. "exited," not
+  "actually bound the port," so a short grace-period timer catches a
+  fast failure (e.g. port 5000 already in use) and swaps to an error
+  state instead of showing a QR code for a dead server. Closing the
+  dialog terminates the process (`closeEvent()`); `MainWindow.closeEvent()`
+  closes the dialog too, so the app never orphans a background uploader.
+
+  `resources.uploader_root()` is why this works in a packaged exe, not
+  just running from source: `project_root()` resolves to PyInstaller's
+  `_MEIPASS` temp extraction dir in a frozen build, and `uploader/` is
+  deliberately never bundled into that (it's a separate tool with its
+  own dependencies) — a path built under `_MEIPASS` would point at a
+  folder that can never exist. `uploader_root()` uses `sys.executable`'s
+  actual on-disk location instead when frozen (stable across runs, unlike
+  `_MEIPASS`), matching this project's documented build layout where the
+  built exe lands at `<repo root>/dist/Happy Boy Atelier.exe` — one level
+  below the repo root, with `uploader/` a sibling of `dist/`.
+
+- **Getting uploads into the library live**: `library.sync_from_uploader()`
+  scans `uploader_photos_dir()` for files not yet in the library index
+  and imports each one through the exact same `add_image()` path a
+  manual "Add Images to Library…" click uses — same copy, same
+  thumbnail generation, same index entry. "Not yet in the library" is
+  tracked via a new `LibraryItem.uploaded_from` field (the uploader's
+  own generated filename, e.g. `20260813-172233-abc123.jpg`; `None` for
+  every image added any other way, including every pre-existing library
+  entry from before this field existed — the usual `.get(key, default)`
+  back-compat fallback), so re-scanning never re-copies or
+  re-thumbnails a photo already pulled in. `LibraryPanel` drives this
+  with a 3-second `QTimer` poll (`_poll_for_uploads()`) rather than a
+  `QFileSystemWatcher` — deliberately: `uploader/photos/` may not exist
+  yet the first time the panel is built (the uploader creates it lazily
+  on its own first run), which a watcher needs extra handling for, and a
+  plain directory listing + set lookup is cheap enough that a few
+  seconds of polling latency costs nothing noticeable while still
+  reading as "live" to someone watching photos land mid-upload. Only
+  calls `refresh()` when something actually changed, so an idle poll
+  tick never disrupts the panel's current scroll position/selection.
+
 ## Project templates (`app/project_templates.py`)
 
 A named `{width, height, unit, guides}` starting point for New Painting —
@@ -590,11 +669,56 @@ format choice. Same JSON-string-in-`QSettings` storage as export presets.
 
 A `QDialog` styled entirely via `theme.py`'s existing global `QDialog`
 rule (no bespoke stylesheet), replacing the previous plain
-`QMessageBox.about()` call from `MainWindow._show_about()` (Help menu).
-Shows the app icon (`resources.app_icon_path()`), name/version from
-`constants.py`, the mission line, and credits — a pre-`MainWindow` launch
-splash screen was explicitly scoped out as real added complexity for a
-fast-starting desktop app.
+`QMessageBox.about()` call from `MainWindow._show_about()` (Options
+menu — see below for why it's not called Help). Shows the app icon
+(`resources.app_icon_path()`), name/version from `constants.py`, the
+mission line, and credits — a pre-`MainWindow` launch splash screen was
+explicitly scoped out as real added complexity for a fast-starting
+desktop app.
+
+## Options menu and Settings (`app/settings.py`, `app/dialogs/settings_dialog.py`)
+
+The menu conventionally named "Help" is `&Options` here instead
+(`MainWindow._build_menu_and_toolbar()`) — this app's Help-equivalent
+menu was never really a documentation-lookup menu (there's no help
+content to look up); it's this app's one catch-all for app-level, not
+project-level, actions: Settings, the phone uploader, and app identity.
+
+`app/settings.py` holds four standard, low-risk preferences — autosave
+interval (with a 0 sentinel for "off," never handed to
+`QTimer.setInterval()` directly, since a real 0ms interval would fire
+continuously), default unit for New Painting, default export DPI, and
+whether new windows show rulers by default. Persisted as plain scalar
+`QSettings` keys (`settings/autosaveIntervalMs` etc.), not the
+JSON-blob-in-one-key pattern `project_templates.py`/`export_dialog.py`'s
+presets need — those exist to reliably round-trip nested dict/bool
+structures across `QSettings` backends, which a single scalar doesn't
+need. Every getter validates and falls back to the historical default on
+a missing/corrupt/out-of-range value (never trusts a raw `QSettings`
+read blindly) — same defensive posture `project_templates.py`'s
+`_load_templates()` already takes for a corrupt index.
+
+Deliberately **not** project state: nothing here is saved into any
+`.atelier` file, none of it is undoable, and none of it retroactively
+touches an already-open project or an already-built dialog — each
+preference only seeds a *default* the next time it's relevant:
+`NewProjectDialog` reads `settings.default_unit()` once at construction,
+converting `CanvasSpec()`'s own default physical size (16×20 real
+inches) into that unit via `constants.from_inches()` rather than
+reinterpreting the raw 16/20 numbers in a different unit (which would
+silently shrink the intended default canvas to a tiny ~6×8in-equivalent
+if the preferred unit were, say, cm); `ExportDialog` reads
+`settings.default_export_dpi()` the same way. The one preference that
+*does* need live re-application is autosave, since it drives an
+already-running `QTimer` on the one persistent `MainWindow` — accepting
+`SettingsDialog` calls `MainWindow._apply_autosave_interval()`
+immediately afterward, the same method `__init__` calls at startup, so
+a changed interval (or turning autosave off) takes effect without a
+restart.
+
+`SettingsDialog` follows `NewProjectDialog`/`ExportDialog`'s own
+accept/reject convention: fields seed from current settings, and only
+Save (not Cancel) writes anything back.
 
 ## Current scope
 
