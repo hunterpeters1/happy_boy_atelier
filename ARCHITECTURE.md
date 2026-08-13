@@ -570,6 +570,69 @@ undo path. Double-clicking a thumbnail does the same import via
 `LibraryPanel.import_requested`, connected straight to
 `MainWindow._import_image_paths()`.
 
+## Phone upload integration (`app/dialogs/phone_upload_dialog.py`, `app/library.py`)
+
+`uploader/` (see its own module docstring) is a fully standalone Flask
+tool with its own venv/dependencies — that boundary is deliberate and
+this integration doesn't cross it. Two separate pieces bridge it to the
+main app without ever importing from it:
+
+- **Launching it** (Help > Upload From Phone…, non-modal — a modal
+  dialog would block watching the library update live, defeating the
+  point). `PhoneUploadDialog` locates the uploader's own venv Python
+  (`.venv/Scripts/python.exe`, falling back to a plain `venv/` name some
+  existing setups use) and starts `uploader/app.py` as a `QProcess`.
+  Since the uploader generates its own random PIN independently and has
+  no PySide6 dependency to report it back through, the dialog instead
+  *dictates* the PIN: it generates one itself and passes it via the
+  `HAPPY_BOY_UPLOADER_PIN` env var, which `uploader/app.py` reads
+  (falling back to its own random generation when unset, so a manual
+  `python app.py` run is completely unaffected). The LAN URL is computed
+  independently too, via the same UDP-socket "which interface would
+  reach the internet" trick `uploader/app.py`'s own `get_lan_ip()` uses,
+  duplicated rather than imported for the same standalone-boundary
+  reason. A real QR code image renders via `qrcode` + its pure-Python
+  `PyPNGImage` factory (no Pillow needed in the main app — the uploader
+  already depends on Pillow for its own thumbnailing, but that's a
+  separate venv). `QProcess` only reports "launched" vs. "exited," not
+  "actually bound the port," so a short grace-period timer catches a
+  fast failure (e.g. port 5000 already in use) and swaps to an error
+  state instead of showing a QR code for a dead server. Closing the
+  dialog terminates the process (`closeEvent()`); `MainWindow.closeEvent()`
+  closes the dialog too, so the app never orphans a background uploader.
+
+  `resources.uploader_root()` is why this works in a packaged exe, not
+  just running from source: `project_root()` resolves to PyInstaller's
+  `_MEIPASS` temp extraction dir in a frozen build, and `uploader/` is
+  deliberately never bundled into that (it's a separate tool with its
+  own dependencies) — a path built under `_MEIPASS` would point at a
+  folder that can never exist. `uploader_root()` uses `sys.executable`'s
+  actual on-disk location instead when frozen (stable across runs, unlike
+  `_MEIPASS`), matching this project's documented build layout where the
+  built exe lands at `<repo root>/dist/Happy Boy Atelier.exe` — one level
+  below the repo root, with `uploader/` a sibling of `dist/`.
+
+- **Getting uploads into the library live**: `library.sync_from_uploader()`
+  scans `uploader_photos_dir()` for files not yet in the library index
+  and imports each one through the exact same `add_image()` path a
+  manual "Add Images to Library…" click uses — same copy, same
+  thumbnail generation, same index entry. "Not yet in the library" is
+  tracked via a new `LibraryItem.uploaded_from` field (the uploader's
+  own generated filename, e.g. `20260813-172233-abc123.jpg`; `None` for
+  every image added any other way, including every pre-existing library
+  entry from before this field existed — the usual `.get(key, default)`
+  back-compat fallback), so re-scanning never re-copies or
+  re-thumbnails a photo already pulled in. `LibraryPanel` drives this
+  with a 3-second `QTimer` poll (`_poll_for_uploads()`) rather than a
+  `QFileSystemWatcher` — deliberately: `uploader/photos/` may not exist
+  yet the first time the panel is built (the uploader creates it lazily
+  on its own first run), which a watcher needs extra handling for, and a
+  plain directory listing + set lookup is cheap enough that a few
+  seconds of polling latency costs nothing noticeable while still
+  reading as "live" to someone watching photos land mid-upload. Only
+  calls `refresh()` when something actually changed, so an idle poll
+  tick never disrupts the panel's current scroll position/selection.
+
 ## Project templates (`app/project_templates.py`)
 
 A named `{width, height, unit, guides}` starting point for New Painting —

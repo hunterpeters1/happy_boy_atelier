@@ -43,6 +43,7 @@ from .canvas.canvas_view import CanvasView
 from .canvas.undo_commands import AddItemCommand
 from .dialogs.about_dialog import AboutDialog
 from .dialogs.command_palette import CommandPalette
+from .dialogs.phone_upload_dialog import PhoneUploadDialog
 from .dialogs.export_dialog import ExportDialog
 from .dialogs.new_project_dialog import NewProjectDialog
 from .dialogs.start_screen import StartScreen
@@ -75,6 +76,12 @@ class MainWindow(QMainWindow):
 
         self.current_path: Path | None = None
         self.meta = ProjectMeta()
+        # Help > Upload From Phone… — tracked so a second menu click
+        # raises the already-open dialog instead of launching a redundant
+        # second uploader process (which would just fail on the same
+        # port), and so closeEvent() can stop the child process if the
+        # main window closes while it's still running.
+        self._phone_upload_dialog: PhoneUploadDialog | None = None
 
         self.scene: CanvasScene | None = None
         self.view: CanvasView | None = None
@@ -497,6 +504,7 @@ class MainWindow(QMainWindow):
             self._theme_actions[mode] = action
 
         help_menu = menu.addMenu("&Help")
+        self._add_action(help_menu, "Upload From Phone…", None, self._show_phone_upload)
         self._add_action(help_menu, "About Happy Boy Atelier", None, self._show_about)
 
         # One QAction per action, shared verbatim by menu and toolbar — a
@@ -739,6 +747,23 @@ class MainWindow(QMainWindow):
         self._set_tooltip(action)
         menu.addAction(action)
         return action
+
+    def _show_phone_upload(self) -> None:
+        # Non-modal (show(), not exec()) — see PhoneUploadDialog's own
+        # docstring for why: the whole point is watching the Reference
+        # Library update live while this stays open alongside the rest
+        # of the app. A currently-open dialog is raised rather than
+        # duplicated (a second uploader process would just fail on the
+        # same port) — but closing it stops its server (see
+        # PhoneUploadDialog.closeEvent()), so re-opening after that needs
+        # a genuinely new instance, not a stale reference to a dialog
+        # whose server has already stopped.
+        if self._phone_upload_dialog is not None and self._phone_upload_dialog.isVisible():
+            self._phone_upload_dialog.raise_()
+            self._phone_upload_dialog.activateWindow()
+            return
+        self._phone_upload_dialog = PhoneUploadDialog(self)
+        self._phone_upload_dialog.show()
 
     def _show_about(self) -> None:
         AboutDialog(self).exec()
@@ -1132,4 +1157,10 @@ class MainWindow(QMainWindow):
         # crash-recovery snapshot, so the next launch only offers recovery
         # after an actual unclean exit (crash, force-quit, power loss).
         recovery.delete_recovery_file()
+        # Closing the main window shouldn't leave an orphaned uploader
+        # process running in the background with no visible dialog left
+        # to stop it from — PhoneUploadDialog.closeEvent() does the
+        # actual QProcess teardown.
+        if self._phone_upload_dialog is not None:
+            self._phone_upload_dialog.close()
         super().closeEvent(event)

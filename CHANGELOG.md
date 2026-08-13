@@ -108,6 +108,17 @@ design rationale. Landed in phases.
   only reliable when set before the window's native handle exists. It's
   now set once, permanently, at startup instead, with no visible effect
   outside Focus Mode.
+- **Phone uploads now flow straight into the Reference Library, live** —
+  photos sent through the `uploader/` tool land in the library
+  automatically, usually within a couple of seconds, no manual import
+  step. **Help > Upload From Phone…** also starts the uploader itself and
+  shows the QR code/URL/PIN right in the app, so a terminal + separate
+  venv activation is no longer required for day-to-day use (the manual
+  `python app.py` path still works exactly as before, unaffected).
+- **The phone uploader's web page has a proper look now** — same
+  brass/graphite palette as the desktop app instead of a generic dark-mode
+  blue accent, tying it visibly to the rest of the product. Purely visual;
+  no behavior changed.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

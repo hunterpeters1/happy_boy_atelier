@@ -13,6 +13,7 @@ Deliberately standalone — not part of the Happy Boy Atelier PySide6 app.
 Run with its own venv: pip install -r requirements.txt && python app.py
 """
 
+import os
 import secrets
 import socket
 import time
@@ -48,7 +49,12 @@ THUMBNAIL_QUALITY = 82
 CONVERTED_JPEG_QUALITY = 95
 PORT = 5000
 
-PIN = f"{secrets.randbelow(1_000_000):06d}"
+# A manual `python app.py` run always generates its own random PIN. When
+# launched by the desktop app instead (Help > Upload From Phone…, see
+# app/dialogs/phone_upload_dialog.py), the launcher needs to know the PIN
+# up front to show it/render a QR code — so it generates one itself and
+# passes it through this env var, which takes priority here if present.
+PIN = os.environ.get("HAPPY_BOY_UPLOADER_PIN") or f"{secrets.randbelow(1_000_000):06d}"
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)

@@ -115,3 +115,34 @@ def test_add_images_with_no_selection_produces_empty_mime_data(library_dir_tmp):
     panel = LibraryPanel()
     mime = panel.list.mimeData([])
     assert not mime.hasUrls()
+
+
+def test_poll_for_uploads_imports_and_refreshes_when_new_photos_land(
+    library_dir_tmp, tmp_path, monkeypatch
+):
+    photos_dir = tmp_path / "uploader_photos"
+    photos_dir.mkdir()
+    monkeypatch.setattr(library, "uploader_photos_dir", lambda: photos_dir)
+
+    panel = LibraryPanel()
+    assert panel.list.count() == 0
+
+    _make_source_image(photos_dir, name="20260813-100000-abc.png")
+    panel._poll_for_uploads()
+
+    assert panel.list.count() == 1
+    assert library.list_items()[0].uploaded_from == "20260813-100000-abc.png"
+
+
+def test_poll_for_uploads_does_not_refresh_when_nothing_new(library_dir_tmp, tmp_path, monkeypatch):
+    photos_dir = tmp_path / "uploader_photos"
+    photos_dir.mkdir()
+    monkeypatch.setattr(library, "uploader_photos_dir", lambda: photos_dir)
+
+    panel = LibraryPanel()
+    refresh_calls = []
+    panel.refresh = lambda: refresh_calls.append(1)
+
+    panel._poll_for_uploads()  # nothing in photos_dir yet
+
+    assert refresh_calls == []

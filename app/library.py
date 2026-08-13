@@ -25,6 +25,8 @@ from pathlib import Path
 from PySide6.QtCore import QStandardPaths, Qt
 from PySide6.QtGui import QPixmap
 
+from . import resources
+
 # Matches CanvasView._IMAGE_EXTENSIONS / MainWindow.import_images()'s file
 # dialog filter -- a library item must be something the canvas can
 # actually accept back, since drag-out reuses that exact drop path.
@@ -52,6 +54,13 @@ class LibraryItem:
     filename: str
     name: str
     tags: list[str] = field(default_factory=list)
+    # The uploader's own filename (e.g. "20260813-172233-abc123.jpg") for an
+    # item that arrived via sync_from_uploader(), None for everything else
+    # (manually added images, and every pre-existing library entry from
+    # before this field existed). Exists purely so a re-scan of the
+    # uploader's photos/ folder can tell "already imported" from "new"
+    # without re-copying/re-thumbnailing a file every poll tick.
+    uploaded_from: str | None = None
 
     def image_path(self) -> Path:
         return library_dir() / _IMAGES_DIRNAME / self.filename
@@ -60,13 +69,16 @@ class LibraryItem:
         return library_dir() / _THUMBS_DIRNAME / f"{self.id}.png"
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "filename": self.filename, "name": self.name, "tags": list(self.tags)}
+        return {
+            "id": self.id, "filename": self.filename, "name": self.name, "tags": list(self.tags),
+            "uploaded_from": self.uploaded_from,
+        }
 
     @staticmethod
     def from_dict(d: dict) -> "LibraryItem":
         return LibraryItem(
             id=d["id"], filename=d["filename"], name=d.get("name", d.get("filename", "")),
-            tags=list(d.get("tags", [])),
+            tags=list(d.get("tags", [])), uploaded_from=d.get("uploaded_from"),
         )
 
 
@@ -106,7 +118,9 @@ def _make_thumbnail(source_path: Path, dest_path: Path) -> None:
     thumb.save(str(dest_path), "PNG")
 
 
-def add_image(source_path: Path, display_name: str | None = None) -> LibraryItem | None:
+def add_image(
+    source_path: Path, display_name: str | None = None, uploaded_from: str | None = None,
+) -> LibraryItem | None:
     """Copy `source_path` into the library folder (original pixels, never
     linked — matches the ".atelier files never link external files" rule
     elsewhere in this app) and generate its thumbnail immediately, not
@@ -114,6 +128,9 @@ def add_image(source_path: Path, display_name: str | None = None) -> LibraryItem
     full-resolution photos every time it opens. Returns None (does
     nothing) for an unsupported extension or an unreadable source file,
     same "skip, don't crash" posture as `MainWindow._import_image_paths()`.
+
+    `uploaded_from` is set only by sync_from_uploader() below — see
+    LibraryItem's own docstring for what it's for.
     """
     source_path = Path(source_path)
     if source_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
@@ -123,7 +140,10 @@ def add_image(source_path: Path, display_name: str | None = None) -> LibraryItem
 
     item_id = str(uuid.uuid4())
     filename = f"{item_id}{source_path.suffix.lower()}"
-    item = LibraryItem(id=item_id, filename=filename, name=display_name or source_path.stem)
+    item = LibraryItem(
+        id=item_id, filename=filename, name=display_name or source_path.stem,
+        uploaded_from=uploaded_from,
+    )
 
     images_dir = library_dir() / _IMAGES_DIRNAME
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +154,43 @@ def add_image(source_path: Path, display_name: str | None = None) -> LibraryItem
     items.append(item)
     _save_index(items)
     return item
+
+
+def uploader_photos_dir() -> Path:
+    """Where uploader/app.py (the standalone phone-upload tool, see its
+    own module docstring) saves incoming photos — not anything
+    Qt-specific, since the uploader deliberately has no PySide6
+    dependency of its own and can't compute (or even know about) this
+    app's QStandardPaths-based library_dir(). See resources.uploader_root()
+    for why this isn't simply resource_path("uploader", "photos").
+    """
+    return Path(resources.uploader_root()) / "photos"
+
+
+def sync_from_uploader() -> list[LibraryItem]:
+    """Pull any phone-uploaded photos not yet in the library into it, the
+    same way a manual "Add Images to Library…" click would. Safe to call
+    repeatedly/on a timer (see LibraryPanel) — an upload already imported
+    is recognized by its uploader filename (LibraryItem.uploaded_from) and
+    skipped, so this never re-copies or re-thumbnails the same photo.
+    Returns only the newly-added items, so a caller can tell "nothing
+    changed" from "the library grew" without a second list_items() diff.
+    """
+    photos_dir = uploader_photos_dir()
+    if not photos_dir.is_dir():
+        return []
+
+    already_synced = {item.uploaded_from for item in _load_index() if item.uploaded_from}
+    new_items = []
+    for path in sorted(photos_dir.iterdir()):
+        if not path.is_file() or path.name in already_synced:
+            continue
+        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+        item = add_image(path, display_name=path.stem, uploaded_from=path.name)
+        if item is not None:
+            new_items.append(item)
+    return new_items
 
 
 def remove_item(item_id: str) -> None:

@@ -113,6 +113,77 @@ def test_new_project_applies_supplied_guides(library_dir_tmp, clean_templates, q
     assert win.scene.guides_layer.grid.isVisible() is False
 
 
+def test_show_phone_upload_creates_and_shows_a_dialog(library_dir_tmp, qapp, monkeypatch):
+    from app.dialogs import phone_upload_dialog as dlg_module
+
+    # The wiring tests below only care about MainWindow's own instance
+    # tracking (raise existing vs. build a new one, close-cleanup) -- not
+    # whether a real uploader process can actually launch on this
+    # (non-Windows, no real venv guaranteed) test machine. Short-circuiting
+    # _venv_python() to None takes the dialog straight to its "not set up"
+    # message without ever touching QProcess.
+    monkeypatch.setattr(dlg_module, "_venv_python", lambda: None)
+
+    win = _window(qapp)
+    win._show_phone_upload()
+
+    assert win._phone_upload_dialog is not None
+    assert win._phone_upload_dialog.isVisible()
+
+
+def test_show_phone_upload_raises_existing_dialog_instead_of_duplicating(
+    library_dir_tmp, qapp, monkeypatch
+):
+    from app.dialogs import phone_upload_dialog as dlg_module
+
+    monkeypatch.setattr(dlg_module, "_venv_python", lambda: None)
+
+    win = _window(qapp)
+    win._show_phone_upload()
+    first = win._phone_upload_dialog
+
+    win._show_phone_upload()
+
+    assert win._phone_upload_dialog is first
+
+
+def test_show_phone_upload_creates_a_fresh_dialog_after_the_last_one_closed(
+    library_dir_tmp, qapp, monkeypatch
+):
+    from app.dialogs import phone_upload_dialog as dlg_module
+
+    monkeypatch.setattr(dlg_module, "_venv_python", lambda: None)
+
+    win = _window(qapp)
+    win._show_phone_upload()
+    first = win._phone_upload_dialog
+    first.close()
+
+    win._show_phone_upload()
+
+    # A stale reference to an already-closed dialog (whose uploader
+    # process, if any, has already stopped) must not be silently reused
+    # -- reopening after a close needs a genuinely new attempt.
+    assert win._phone_upload_dialog is not first
+    assert win._phone_upload_dialog.isVisible()
+
+
+def test_closing_main_window_also_closes_the_phone_upload_dialog(
+    library_dir_tmp, qapp, monkeypatch
+):
+    from app.dialogs import phone_upload_dialog as dlg_module
+
+    monkeypatch.setattr(dlg_module, "_venv_python", lambda: None)
+
+    win = _window(qapp)
+    win._show_phone_upload()
+    assert win._phone_upload_dialog.isVisible()
+
+    win.close()
+
+    assert not win._phone_upload_dialog.isVisible()
+
+
 def test_new_project_without_guides_leaves_defaults(library_dir_tmp, clean_templates, qapp):
     win = _window(qapp)
     win._new_project(CanvasSpec())
