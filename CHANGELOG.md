@@ -136,6 +136,13 @@ design rationale. Landed in phases.
   a photo without fighting a fiddly freehand angle. Independent of the
   existing Shift-held hard snap to 15° increments, which is unchanged;
   hold **Alt** to rotate with no snapping at all.
+- **The phone uploader can now remember a device** — checking "Remember
+  this device" (default checked) on the PIN screen skips the PIN
+  entirely on every future visit from that phone, via a separate
+  long-lived, hashed-at-rest trust token that survives the uploader
+  restarting — the fresh-PIN-per-launch behavior for a *new* device is
+  unchanged. A **"Forget this device"** link on the gallery page revokes
+  it again, for a borrowed or shared phone.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

@@ -106,6 +106,19 @@
       margin-top: 24px;
       font-size: 0.9rem;
     }
+    .forget-device {
+      display: block;
+      text-align: center;
+      margin-top: 28px;
+      font-size: 0.8rem;
+      color: var(--ink-dim);
+      background: none;
+      border: none;
+      text-decoration: underline;
+      cursor: pointer;
+      width: 100%;
+      padding: 8px;
+    }
   </style>
 </head>
 <body>
@@ -123,12 +136,21 @@
   <div class="gallery" id="gallery"></div>
   <p class="empty" id="emptyState" hidden>No photos yet.</p>
 
+  <button type="button" class="forget-device" id="forgetDeviceBtn">Forget this device</button>
+
   <script>
     const fileInput = document.getElementById("fileInput");
     const dropZone = document.getElementById("dropZone");
     const statusEl = document.getElementById("status");
     const galleryEl = document.getElementById("gallery");
     const emptyStateEl = document.getElementById("emptyState");
+    const forgetDeviceBtn = document.getElementById("forgetDeviceBtn");
+
+    forgetDeviceBtn.addEventListener("click", async () => {
+      if (!confirm("Forget this device? You'll need the PIN again next time.")) return;
+      await fetch("/forget-device", { method: "POST" });
+      window.location.href = "/login";
+    });
 
     async function uploadFiles(files) {
       const list = Array.from(files);

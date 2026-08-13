@@ -247,6 +247,15 @@ open — closing it just stops the upload server. (First time only: this
 needs the uploader's own dependencies installed once — see below if it
 tells you they're missing.)
 
+Check **"Remember this device"** on the PIN screen (checked by default)
+and that phone skips straight past the PIN on every future visit — no
+re-entering a new PIN each time the uploader is relaunched. This is a
+separate, longer-lived trust token, not an extension of the PIN itself,
+so it survives the uploader restarting (each restart still generates a
+fresh PIN for any new device pairing). Using a borrowed or shared phone?
+Leave the box unchecked, or tap **"Forget this device"** at the bottom of
+the upload page afterward to revoke it again.
+
 If you'd rather run it by hand (or the in-app launcher can't find its
 dependencies yet), `uploader/` is also a small standalone tool with its
 own venv:

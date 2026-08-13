@@ -649,6 +649,34 @@ main app without ever importing from it:
   calls `refresh()` when something actually changed, so an idle poll
   tick never disrupts the panel's current scroll position/selection.
 
+- **"Remember this device" (`uploader/app.py`)**: a deliberately separate
+  trust layer bolted on top of the PIN/session model, not an extension of
+  it. The PIN and the Flask session it unlocks stay short-lived by
+  design — a fresh random PIN and a fresh `app.secret_key` (which
+  invalidates any old session cookie) every process start — which is
+  right for first-time pairing but would otherwise mean re-entering a
+  new PIN on every single relaunch, forever. On successful login with
+  the "remember this device" checkbox checked (`login.html`, default
+  checked), the server hands the browser a long-lived, high-entropy
+  cookie (`secrets.token_urlsafe(32)`, `REMEMBER_COOKIE_MAX_AGE` ≈ 6
+  months) and records that token — SHA-256 hashed, never plaintext, so a
+  leaked `trusted_devices.json` can't be replayed directly — in a small
+  JSON file next to `photos/`. That file survives process restarts, so a
+  remembered phone skips the PIN screen entirely (`login_required()`
+  accepts `_is_remembered_device()` alongside the normal session check;
+  a remembered device hitting `/login` directly gets redirected straight
+  to the gallery). Hashes load into an in-memory set once at process
+  start (`_trusted_hashes`) rather than being re-read from disk on every
+  request — this is always a single process with no cross-process cache
+  to invalidate, and `_save_trusted_hashes()` persists on every actual
+  change. `/forget-device` (reachable from a button on the gallery page
+  itself, `index.html`) revokes just that one device's token and clears
+  its cookie, without touching the PIN model or any other remembered
+  device — self-service revocation for a borrowed/shared-phone scenario,
+  rather than a manual file-deletion escape hatch. `uploader/trusted_devices.json`
+  is gitignored, same as `uploader/photos/` — it's a per-artist local
+  store, not something to commit.
+
 ## Project templates (`app/project_templates.py`)
 
 A named `{width, height, unit, guides}` starting point for New Painting —

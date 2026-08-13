@@ -13,6 +13,8 @@ Deliberately standalone — not part of the Happy Boy Atelier PySide6 app.
 Run with its own venv: pip install -r requirements.txt && python app.py
 """
 
+import hashlib
+import json
 import os
 import secrets
 import socket
@@ -49,6 +51,30 @@ THUMBNAIL_QUALITY = 82
 CONVERTED_JPEG_QUALITY = 95
 PORT = 5000
 
+# -- "remember this device" --------------------------------------------
+# The PIN (and the Flask session it unlocks) is deliberately short-lived —
+# a fresh random PIN every process start, and app.secret_key below is
+# regenerated every start too, which invalidates any old session cookie a
+# browser might still be holding. That's the right model for the PIN
+# itself, but it means a phone would have to re-enter a new PIN on *every*
+# single launch of the uploader, forever — real friction for something
+# meant to be a day-to-day tool, not a one-off.
+#
+# So "remembering" a device is deliberately a separate, independent trust
+# layer bolted on top, not a side effect of extending the PIN session:
+# on successful login (with the "remember this device" box checked), the
+# server hands the browser a long-lived, high-entropy token in its own
+# cookie, and remembers that token (hashed, not in plaintext -- so a
+# leaked trusted_devices.json can't be replayed directly) in a small JSON
+# file next to photos/. That file survives process restarts, so a
+# remembered phone skips the PIN screen entirely on every future launch,
+# while the PIN/session mechanism protecting *first-time* pairing is
+# completely unchanged. "Forget this device" (the gallery page) removes
+# just that one token, without touching the PIN model at all.
+TRUSTED_DEVICES_PATH = BASE_DIR / "trusted_devices.json"
+REMEMBER_COOKIE_NAME = "hba_device"
+REMEMBER_COOKIE_MAX_AGE = 180 * 24 * 60 * 60  # ~6 months
+
 # A manual `python app.py` run always generates its own random PIN. When
 # launched by the desktop app instead (Help > Upload From Phone…, see
 # app/dialogs/phone_upload_dialog.py), the launcher needs to know the PIN
@@ -74,25 +100,90 @@ def make_thumbnail(source_path, dest_path):
         image.save(dest_path, "JPEG", quality=THUMBNAIL_QUALITY)
 
 
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _load_trusted_hashes() -> set:
+    if not TRUSTED_DEVICES_PATH.exists():
+        return set()
+    try:
+        data = json.loads(TRUSTED_DEVICES_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()  # a corrupt file is treated as "no remembered devices", never a crash
+    return set(data.get("tokens", []))
+
+
+def _save_trusted_hashes() -> None:
+    TRUSTED_DEVICES_PATH.write_text(
+        json.dumps({"tokens": sorted(_trusted_hashes)}, indent=2), encoding="utf-8"
+    )
+
+
+# Loaded once at process start and kept in memory rather than re-read from
+# disk on every request (every photo grid poll, every thumbnail) -- this
+# is always a single process, so there's no cross-process cache to
+# invalidate; _save_trusted_hashes() persists it on every actual change.
+_trusted_hashes = _load_trusted_hashes()
+
+
+def _is_remembered_device() -> bool:
+    token = request.cookies.get(REMEMBER_COOKIE_NAME)
+    return bool(token) and _hash_token(token) in _trusted_hashes
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if not session.get("authenticated"):
-            return redirect(url_for("login"))
-        return view(*args, **kwargs)
+        if session.get("authenticated") or _is_remembered_device():
+            return view(*args, **kwargs)
+        return redirect(url_for("login"))
 
     return wrapped
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if request.method == "GET" and _is_remembered_device():
+        # A remembered phone hitting /login directly (e.g. an old
+        # bookmark, or the session cookie expired but the device is still
+        # trusted) shouldn't have to see the PIN screen at all.
+        return redirect(url_for("index"))
+
     error = None
     if request.method == "POST":
         if secrets.compare_digest(request.form.get("pin", ""), PIN):
             session["authenticated"] = True
-            return redirect(url_for("index"))
+            response = redirect(url_for("index"))
+            if request.form.get("remember") == "on":
+                token = secrets.token_urlsafe(32)
+                _trusted_hashes.add(_hash_token(token))
+                _save_trusted_hashes()
+                response.set_cookie(
+                    REMEMBER_COOKIE_NAME, token, max_age=REMEMBER_COOKIE_MAX_AGE,
+                    httponly=True, samesite="Lax",
+                )
+            return response
         error = "Incorrect PIN."
     return render_template("login.html", error=error)
+
+
+@app.route("/forget-device", methods=["POST"])
+def forget_device():
+    """Un-remembers *this* device only -- removes its one token from the
+    trusted store and clears its cookie, without touching the PIN model
+    or any other remembered device. Reachable from the gallery page
+    itself (index.html), so an artist who uploaded from a borrowed/shared
+    phone has a real way to revoke it again.
+    """
+    token = request.cookies.get(REMEMBER_COOKIE_NAME)
+    if token:
+        _trusted_hashes.discard(_hash_token(token))
+        _save_trusted_hashes()
+    session.pop("authenticated", None)
+    response = redirect(url_for("login"))
+    response.delete_cookie(REMEMBER_COOKIE_NAME)
+    return response
 
 
 @app.route("/")
