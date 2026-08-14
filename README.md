@@ -250,16 +250,26 @@ Mode, a developer theme with extra debug tools.
 
 - **Options > Settings…** — a few standard defaults you can customize:
   autosave interval (or turn it off entirely), the unit New Painting
-  starts with, the DPI Export starts with, and whether new windows show
-  rulers by default. All four are pure workflow preferences — nothing
-  here is saved into any painting, and changing one only affects what
-  happens *next* (a future New Painting, a future Export, a future
-  autosave tick), never anything already open or already exported.
-  Autosave changes take effect immediately; the others apply the next
-  time that dialog/window opens.
+  starts with, the DPI Export starts with, whether new windows show
+  rulers by default, and Futuristic UI accents (below). All are pure
+  workflow preferences — nothing here is saved into any painting, and
+  changing one only affects what happens *next* (a future New Painting,
+  a future Export, a future autosave tick), never anything already open
+  or already exported. Autosave and the accents toggle take effect
+  immediately; the others apply the next time that dialog/window opens.
 - **Options > Upload From Phone…** — see below.
 - **Options > About Happy Boy Atelier** shows the app's version and
   mission statement.
+
+**Futuristic UI accents** (on by default, toggle in Settings) is a small
+set of motion/glow touches layered on top of the regular brass/graphite
+look, not a replacement for it: a soft breathing glow on whichever
+placement tool is currently armed in the Project Panel, an eased fade-in
+for the resize/rotate handles when you select something (and for docks
+restored after Focus Mode), and softened, curved rendering for movement
+lines instead of hard straight segments. Every one of these has a plain,
+instant equivalent when the setting is off — nothing is gated behind it,
+only the animation/softening around it.
 
 ## Upload from phone
 

@@ -11,9 +11,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from PySide6.QtCore import Qt
+import pytest
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtWidgets import QGraphicsOpacityEffect
 
+from app import settings
 from app.main_window import MainWindow
+
+
+@pytest.fixture
+def clean_accents_setting(qapp):
+    QSettings().remove("settings/futuristicAccentsEnabled")
+    yield
+    QSettings().remove("settings/futuristicAccentsEnabled")
 
 
 def _window(qapp) -> MainWindow:
@@ -132,3 +142,27 @@ def test_focus_mode_shows_opacity_slider_and_resets_it_on_exit(qapp):
     assert win.focus_opacity_label.isHidden()
     assert win.focus_opacity_slider.value() == 100
     assert win.windowOpacity() == 1.0
+
+
+def test_restored_docks_fade_in_when_accents_enabled(qapp, clean_accents_setting):
+    settings.set_futuristic_accents_enabled(True)
+    win = _window(qapp)
+
+    win.focus_mode_action.trigger()  # enter
+    win.focus_mode_action.trigger()  # exit
+
+    # Visibility itself is still synchronous (see the docstring on the
+    # exit branch of toggle_focus_mode()) -- only the opacity eases in.
+    assert win.layers_dock.isVisible() is True
+    assert isinstance(win.layers_dock.graphicsEffect(), QGraphicsOpacityEffect)
+
+
+def test_restored_docks_have_no_fade_effect_when_accents_disabled(qapp, clean_accents_setting):
+    settings.set_futuristic_accents_enabled(False)
+    win = _window(qapp)
+
+    win.focus_mode_action.trigger()  # enter
+    win.focus_mode_action.trigger()  # exit
+
+    assert win.layers_dock.isVisible() is True
+    assert win.layers_dock.graphicsEffect() is None

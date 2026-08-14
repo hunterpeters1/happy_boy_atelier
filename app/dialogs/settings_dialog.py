@@ -61,6 +61,16 @@ class SettingsDialog(QDialog):
         self.rulers_check.setChecked(settings.show_rulers_by_default())
         form.addRow("", self.rulers_check)
 
+        self.accents_check = QCheckBox("Futuristic UI accents")
+        self.accents_check.setChecked(settings.futuristic_accents_enabled())
+        self.accents_check.setToolTip(
+            "A subtle glow pulse on the active tool, an eased fade-in for "
+            "selection handles and restored panels, and softened movement-"
+            "line curves. Purely cosmetic — turning this off makes each of "
+            "those instant/hard-edged instead, nothing is removed."
+        )
+        form.addRow("", self.accents_check)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
@@ -76,4 +86,5 @@ class SettingsDialog(QDialog):
         settings.set_default_unit(self.unit_combo.currentText())
         settings.set_default_export_dpi(self.dpi_spin.value())
         settings.set_show_rulers_by_default(self.rulers_check.isChecked())
+        settings.set_futuristic_accents_enabled(self.accents_check.isChecked())
         self.accept()

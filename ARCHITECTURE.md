@@ -748,6 +748,79 @@ restart.
 accept/reject convention: fields seed from current settings, and only
 Save (not Cancel) writes anything back.
 
+`settings.py`'s fifth preference, `futuristic_accents_enabled()` (default
+on), gates the motion/glow accents documented in the next section.
+
+## Futuristic UI accents
+
+A small, additive layer of motion/glow on top of the existing brass/
+graphite instrument-panel identity — not a replacement for it, and not
+the "organic/futuristic" full re-skin that was considered and explicitly
+turned down: the hairline-stroke, no-gradient, no-drop-shadow visual law
+elsewhere in this document stays intact. Everything here is gated by
+`settings.futuristic_accents_enabled()`, and every accent has a plain,
+instant fallback when it's off — turning it off never removes a
+capability, only the animation/softening around it.
+
+- **Active-tool glow pulse** (`app/panels/layers_panel.py`,
+  `_start_tool_glow()`): whichever placement-tool button is currently
+  armed (`_sync_tool_buttons()`) gets a `QGraphicsDropShadowEffect` with
+  no offset — a glow, not a drop shadow — whose `blurRadius` a looped
+  `QPropertyAnimation` breathes between `_TOOL_GLOW_MIN_BLUR` and
+  `_TOOL_GLOW_MAX_BLUR` over `_TOOL_GLOW_PERIOD_MS` (a slow ~1.8s cycle,
+  deliberately not fast/bright — this sits next to a button someone may
+  click repeatedly while placing several markers). `_sync_tool_buttons()`
+  tracks one animation per tool in `self._tool_glow_anims`, stopping and
+  dropping the previous tool's before starting the new one; `refresh_structure()`
+  clears that dict outright since `tree.clear()` is about to destroy the
+  buttons those animations targeted anyway (Qt would stop/delete them
+  along with their parent button regardless — this just drops the
+  now-stale Python references).
+- **Handle-frame fade-in** (`app/canvas/handle_frame.py`,
+  `HandleFrame.set_active()`): the corner/rotate handles fade in via a
+  `QVariantAnimation` (0 → 1 opacity, `OutCubic`, ~140ms) when a new item
+  is selected, instead of snapping straight to visible. Deliberately
+  one-directional — deactivating stays an instant `setVisible(False)`,
+  since a lingering fade-out right after a deselect click would read as
+  unresponsive, not smooth. Uses `QVariantAnimation` rather than
+  `QPropertyAnimation` because the handle items are plain
+  `QGraphicsRectItem`s, not `QGraphicsObject`s — `setOpacity()` is called
+  directly from the animation's `valueChanged` callback instead of
+  binding a Qt property.
+- **Focus Mode dock fade-in** (`app/main_window.py`,
+  `MainWindow._fade_dock_in()`): docks restored on Focus Mode *exit* ease
+  their opacity in (`QGraphicsOpacityEffect` + `QPropertyAnimation`,
+  ~180ms). Entry (hiding) deliberately stays the existing instant
+  `setVisible(False)` regardless of this setting — "clear the bench"
+  should read as decisive, and `test_focus_mode.py` asserts dock
+  visibility synchronously right after triggering, which a fade-then-hide
+  would break. Visibility itself is still synchronous either way; only
+  the opacity animates in after.
+- **Softened movement-line curves** (`app/layers/composition_layer.py`,
+  `_smooth_polyline_path()`): `MovementLineItem.paint()` renders its
+  points as a smooth curve — each interior point becomes a quadratic-
+  Bezier control point steering toward the midpoint of itself and the
+  next point, a standard cheap way to soften a polyline — instead of
+  hard `lineTo()` segments. The path still starts and ends exactly at the
+  artist's own first/last points; with only 2 points (the default) there's
+  nothing to smooth, so it's pixel-identical to the straight-line fallback.
+  Rule of thirds/golden ratio/inch-grid overlays (`app/layers/guide_overlay.py`)
+  are deliberately untouched — those are precise fractional-position
+  references, not a flow/curve to begin with, so "softening" them would
+  undermine the one thing they're for.
+
+**A real gotcha hit building this**: `QGraphicsDropShadowEffect()`/
+`QGraphicsOpacityEffect()` constructed with no parent, then attached via
+`widget.setGraphicsEffect(effect)`, get garbage-collected by PySide6 the
+moment the enclosing Python function returns — confirmed at runtime the
+effect silently vanished off the widget despite `setGraphicsEffect()`
+documenting a Qt-level ownership transfer; PySide6 doesn't treat that
+transfer as a reason to keep the Python wrapper alive. Both effect
+constructors here take the target widget explicitly
+(`QGraphicsDropShadowEffect(btn)` / `QGraphicsOpacityEffect(dock)`) for
+exactly this reason — dropping the explicit parent silently breaks the
+effect with no exception raised anywhere.
+
 ## Current scope
 
 Beyond the original MVP (create canvas → import & arrange references →
