@@ -8,6 +8,32 @@ placed by the artist.
 
 See `ARCHITECTURE.md` for the technical design.
 
+## Screenshots
+
+The main workspace — reference photos plus the Project Panel outliner,
+Properties panel, and ruler, all in the brass/graphite instrument-panel
+theme:
+
+![Main workspace, dark mode](docs/screenshots/main-window.png)
+
+New Painting, Export, Settings, and About — the app's other everyday
+windows:
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/new-painting.png" alt="New Painting dialog"></td>
+    <td><img src="docs/screenshots/export.png" alt="Export dialog"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/settings.png" alt="Settings dialog"></td>
+    <td><img src="docs/screenshots/about.png" alt="About dialog"></td>
+  </tr>
+</table>
+
+(Reference images shown above are placeholder art generated for this
+README, not real photos — the app itself never generates or alters
+imagery.)
+
 ## Getting started (Windows)
 
 1. Install Python 3.10 or newer from python.org (check "Add to PATH").
