@@ -27,11 +27,21 @@ _CornerScaleHandle docstring below).
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEasingCurve, Qt, QVariantAnimation
 from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsRectItem
 
 from .. import constants as C
+from .. import settings
+
+# How long the corner/rotate handles take to fade in when a new item is
+# selected -- see settings.futuristic_accents_enabled(). Deliberately
+# one-directional: fading *out* on deselect would mean the handles
+# linger, semi-visible, right after a click that was meant to clear the
+# selection, which reads as unresponsive rather than smooth. Appearing
+# eases in; disappearing stays an instant setVisible(False), same as
+# with accents off.
+_FADE_IN_MS = 140
 
 HANDLE_PX = 9
 MIN_SCALE = 0.05
@@ -146,6 +156,7 @@ class HandleFrame:
         # Always created (not lazily) so they're ready the moment an image
         # with a crop is selected, with no allocation jitter on first use.
         self._edges = [_EdgeHandle(target, e) for e in ("left", "right", "top", "bottom")]
+        self._fade_anim: QVariantAnimation | None = None
         self.set_active(False)
         self.set_crop_handles_visible(False)
 
@@ -157,11 +168,33 @@ class HandleFrame:
             h.reposition()
 
     def set_active(self, active: bool) -> None:
-        for h in self._corners:
-            h.setVisible(active)
-        self._rotate.setVisible(active)
+        if self._fade_anim is not None:
+            self._fade_anim.stop()
+            self._fade_anim = None
+
+        handles = [*self._corners, self._rotate]
         if active:
+            for h in handles:
+                h.setVisible(True)
             self.reposition()
+            if settings.futuristic_accents_enabled():
+                for h in handles:
+                    h.setOpacity(0.0)
+                anim = QVariantAnimation(self._target)
+                anim.setStartValue(0.0)
+                anim.setEndValue(1.0)
+                anim.setDuration(_FADE_IN_MS)
+                anim.setEasingCurve(QEasingCurve.OutCubic)
+                anim.valueChanged.connect(lambda v, hs=handles: [h.setOpacity(v) for h in hs])
+                anim.start()
+                self._fade_anim = anim
+            else:
+                for h in handles:
+                    h.setOpacity(1.0)
+        else:
+            for h in handles:
+                h.setVisible(False)
+                h.setOpacity(1.0)
 
     def set_crop_handles_visible(self, visible: bool) -> None:
         """Show/hide the edge (crop) handles independently from the

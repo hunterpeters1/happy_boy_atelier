@@ -5,13 +5,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QPointF, QSettings, QSize, QStandardPaths, QTimer
+from PySide6.QtCore import Qt, QEasingCurve, QPointF, QPropertyAnimation, QSettings, QSize, QStandardPaths, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
     QDockWidget,
     QFileDialog,
+    QGraphicsOpacityEffect,
     QInputDialog,
     QLabel,
     QMainWindow,
@@ -597,7 +598,17 @@ class MainWindow(QMainWindow):
         else:
             for dock in docks:
                 if dock is not None:
-                    dock.setVisible(self._pre_focus_dock_visible.get(id(dock), True))
+                    want_visible = self._pre_focus_dock_visible.get(id(dock), True)
+                    dock.setVisible(want_visible)
+                    # Restoring (not hiding) eases in when accents are on
+                    # -- see settings.futuristic_accents_enabled(). Entry
+                    # stays an instant setVisible(False) above regardless
+                    # of the setting: "clear the bench" reads as decisive,
+                    # not smooth, and test_focus_mode.py asserts dock
+                    # visibility synchronously right after triggering,
+                    # which a fade-then-hide would break.
+                    if want_visible and settings.futuristic_accents_enabled():
+                        self._fade_dock_in(dock)
             self.toolbar.setVisible(self._pre_focus_toolbar_visible)
             if self.scene is not None:
                 self.scene.set_desk_transparent(False)
@@ -613,6 +624,30 @@ class MainWindow(QMainWindow):
         self._focus_mode = entering
         if self.focus_mode_action.isChecked() != entering:
             self.focus_mode_action.setChecked(entering)
+
+    @staticmethod
+    def _fade_dock_in(dock: QDockWidget) -> None:
+        # dock passed as the constructor's parent, not
+        # QGraphicsOpacityEffect() + setGraphicsEffect(effect) after --
+        # see the matching comment on layers_panel.py's _start_tool_glow:
+        # confirmed at runtime that without an explicit parent here,
+        # PySide6 garbage-collects the effect (silently clearing it off
+        # the dock) the moment this function returns, despite
+        # setGraphicsEffect() supposedly transferring ownership.
+        effect = QGraphicsOpacityEffect(dock)
+        effect.setOpacity(0.0)
+        dock.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity", dock)
+        anim.setDuration(180)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        # Drop the opacity effect once the fade lands on 1.0 -- leaving
+        # one permanently installed forces Qt to composite the dock
+        # offscreen on every repaint from then on, for no visual benefit
+        # once it's fully opaque.
+        anim.finished.connect(lambda: dock.setGraphicsEffect(None))
+        anim.start(QPropertyAnimation.DeleteWhenStopped)
 
     # -- appearance -----------------------------------------------------
     def _change_desk_color(self) -> None:

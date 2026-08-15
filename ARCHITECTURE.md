@@ -649,6 +649,34 @@ main app without ever importing from it:
   calls `refresh()` when something actually changed, so an idle poll
   tick never disrupts the panel's current scroll position/selection.
 
+- **"Remember this device" (`uploader/app.py`)**: a deliberately separate
+  trust layer bolted on top of the PIN/session model, not an extension of
+  it. The PIN and the Flask session it unlocks stay short-lived by
+  design — a fresh random PIN and a fresh `app.secret_key` (which
+  invalidates any old session cookie) every process start — which is
+  right for first-time pairing but would otherwise mean re-entering a
+  new PIN on every single relaunch, forever. On successful login with
+  the "remember this device" checkbox checked (`login.html`, default
+  checked), the server hands the browser a long-lived, high-entropy
+  cookie (`secrets.token_urlsafe(32)`, `REMEMBER_COOKIE_MAX_AGE` ≈ 6
+  months) and records that token — SHA-256 hashed, never plaintext, so a
+  leaked `trusted_devices.json` can't be replayed directly — in a small
+  JSON file next to `photos/`. That file survives process restarts, so a
+  remembered phone skips the PIN screen entirely (`login_required()`
+  accepts `_is_remembered_device()` alongside the normal session check;
+  a remembered device hitting `/login` directly gets redirected straight
+  to the gallery). Hashes load into an in-memory set once at process
+  start (`_trusted_hashes`) rather than being re-read from disk on every
+  request — this is always a single process with no cross-process cache
+  to invalidate, and `_save_trusted_hashes()` persists on every actual
+  change. `/forget-device` (reachable from a button on the gallery page
+  itself, `index.html`) revokes just that one device's token and clears
+  its cookie, without touching the PIN model or any other remembered
+  device — self-service revocation for a borrowed/shared-phone scenario,
+  rather than a manual file-deletion escape hatch. `uploader/trusted_devices.json`
+  is gitignored, same as `uploader/photos/` — it's a per-artist local
+  store, not something to commit.
+
 ## Project templates (`app/project_templates.py`)
 
 A named `{width, height, unit, guides}` starting point for New Painting —
@@ -719,6 +747,79 @@ restart.
 `SettingsDialog` follows `NewProjectDialog`/`ExportDialog`'s own
 accept/reject convention: fields seed from current settings, and only
 Save (not Cancel) writes anything back.
+
+`settings.py`'s fifth preference, `futuristic_accents_enabled()` (default
+on), gates the motion/glow accents documented in the next section.
+
+## Futuristic UI accents
+
+A small, additive layer of motion/glow on top of the existing brass/
+graphite instrument-panel identity — not a replacement for it, and not
+the "organic/futuristic" full re-skin that was considered and explicitly
+turned down: the hairline-stroke, no-gradient, no-drop-shadow visual law
+elsewhere in this document stays intact. Everything here is gated by
+`settings.futuristic_accents_enabled()`, and every accent has a plain,
+instant fallback when it's off — turning it off never removes a
+capability, only the animation/softening around it.
+
+- **Active-tool glow pulse** (`app/panels/layers_panel.py`,
+  `_start_tool_glow()`): whichever placement-tool button is currently
+  armed (`_sync_tool_buttons()`) gets a `QGraphicsDropShadowEffect` with
+  no offset — a glow, not a drop shadow — whose `blurRadius` a looped
+  `QPropertyAnimation` breathes between `_TOOL_GLOW_MIN_BLUR` and
+  `_TOOL_GLOW_MAX_BLUR` over `_TOOL_GLOW_PERIOD_MS` (a slow ~1.8s cycle,
+  deliberately not fast/bright — this sits next to a button someone may
+  click repeatedly while placing several markers). `_sync_tool_buttons()`
+  tracks one animation per tool in `self._tool_glow_anims`, stopping and
+  dropping the previous tool's before starting the new one; `refresh_structure()`
+  clears that dict outright since `tree.clear()` is about to destroy the
+  buttons those animations targeted anyway (Qt would stop/delete them
+  along with their parent button regardless — this just drops the
+  now-stale Python references).
+- **Handle-frame fade-in** (`app/canvas/handle_frame.py`,
+  `HandleFrame.set_active()`): the corner/rotate handles fade in via a
+  `QVariantAnimation` (0 → 1 opacity, `OutCubic`, ~140ms) when a new item
+  is selected, instead of snapping straight to visible. Deliberately
+  one-directional — deactivating stays an instant `setVisible(False)`,
+  since a lingering fade-out right after a deselect click would read as
+  unresponsive, not smooth. Uses `QVariantAnimation` rather than
+  `QPropertyAnimation` because the handle items are plain
+  `QGraphicsRectItem`s, not `QGraphicsObject`s — `setOpacity()` is called
+  directly from the animation's `valueChanged` callback instead of
+  binding a Qt property.
+- **Focus Mode dock fade-in** (`app/main_window.py`,
+  `MainWindow._fade_dock_in()`): docks restored on Focus Mode *exit* ease
+  their opacity in (`QGraphicsOpacityEffect` + `QPropertyAnimation`,
+  ~180ms). Entry (hiding) deliberately stays the existing instant
+  `setVisible(False)` regardless of this setting — "clear the bench"
+  should read as decisive, and `test_focus_mode.py` asserts dock
+  visibility synchronously right after triggering, which a fade-then-hide
+  would break. Visibility itself is still synchronous either way; only
+  the opacity animates in after.
+- **Softened movement-line curves** (`app/layers/composition_layer.py`,
+  `_smooth_polyline_path()`): `MovementLineItem.paint()` renders its
+  points as a smooth curve — each interior point becomes a quadratic-
+  Bezier control point steering toward the midpoint of itself and the
+  next point, a standard cheap way to soften a polyline — instead of
+  hard `lineTo()` segments. The path still starts and ends exactly at the
+  artist's own first/last points; with only 2 points (the default) there's
+  nothing to smooth, so it's pixel-identical to the straight-line fallback.
+  Rule of thirds/golden ratio/inch-grid overlays (`app/layers/guide_overlay.py`)
+  are deliberately untouched — those are precise fractional-position
+  references, not a flow/curve to begin with, so "softening" them would
+  undermine the one thing they're for.
+
+**A real gotcha hit building this**: `QGraphicsDropShadowEffect()`/
+`QGraphicsOpacityEffect()` constructed with no parent, then attached via
+`widget.setGraphicsEffect(effect)`, get garbage-collected by PySide6 the
+moment the enclosing Python function returns — confirmed at runtime the
+effect silently vanished off the widget despite `setGraphicsEffect()`
+documenting a Qt-level ownership transfer; PySide6 doesn't treat that
+transfer as a reason to keep the Python wrapper alive. Both effect
+constructors here take the target widget explicitly
+(`QGraphicsDropShadowEffect(btn)` / `QGraphicsOpacityEffect(dock)`) for
+exactly this reason — dropping the explicit parent silently breaks the
+effect with no exception raised anywhere.
 
 ## Current scope
 

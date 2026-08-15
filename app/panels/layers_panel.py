@@ -26,14 +26,15 @@ assigned as ascending list-index (see e.g. ReferenceLayerGroup._reassign_z).
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtCore import QPropertyAnimation, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QDoubleSpinBox,
     QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -51,8 +52,20 @@ from PySide6.QtWidgets import (
 from .. import constants as C
 from .. import icons
 from .. import scrollbars
+from .. import settings
 from ..constants import LayerKind, PerspectiveMode
 from ..canvas.undo_commands import SetPerspectiveModeCommand, SetPropertyCommand
+
+# Slow, low-amplitude "breathing" glow on the currently-armed placement
+# tool -- see settings.futuristic_accents_enabled(). Kept as a small
+# glow (QGraphicsDropShadowEffect with no offset, not a real drop
+# shadow) rather than a fast/bright pulse: this sits next to a button
+# someone is about to click repeatedly while placing several markers, so
+# it needs to read as "this is live" without being distracting.
+_TOOL_GLOW_COLOR = C.COLOR_BRASS_BRIGHT
+_TOOL_GLOW_MIN_BLUR = 6.0
+_TOOL_GLOW_MAX_BLUR = 18.0
+_TOOL_GLOW_PERIOD_MS = 1800
 from ..layers.reference_layer import ReferenceImageItem
 from ..layers.composition_layer import FocalPointItem, MeasurementItem, MovementLineItem, NoteItem
 from ..layers.lighting_layer import LightSourceItem, DirectionArrowItem
@@ -342,6 +355,7 @@ class LayersPanel(QWidget):
         super().__init__(parent)
         self.scene = scene
         self._tool_buttons: dict[str, QToolButton] = {}
+        self._tool_glow_anims: dict[str, QPropertyAnimation] = {}
         self._row_for_obj: dict[int, QTreeWidgetItem] = {}
         self._layer_rows: dict[LayerKind, QTreeWidgetItem] = {}
         self._expanded_default: dict[LayerKind, bool] = {kind: True for kind in C.LAYER_ORDER}
@@ -445,6 +459,12 @@ class LayersPanel(QWidget):
             self._row_for_obj = {}
             self._layer_rows = {}
             self._tool_buttons = {}
+            # The old buttons these animations targeted are about to be
+            # destroyed by tree.clear() below -- Qt already stops/deletes
+            # each animation along with its button (it's parented to it),
+            # this just drops our own now-stale Python references so
+            # nothing here can touch a deleted QObject.
+            self._tool_glow_anims = {}
 
             self._build_layer(LayerKind.REFERENCE, "image", self.scene.reference_layer, self._populate_reference)
             self._add_layer_separator()
@@ -965,8 +985,45 @@ class LayersPanel(QWidget):
         self._sync_tool_buttons(new_tool)
 
     def _sync_tool_buttons(self, active_tool: str | None) -> None:
+        accents_on = settings.futuristic_accents_enabled()
         for tool, btn in self._tool_buttons.items():
             btn.blockSignals(True)
             btn.setChecked(tool == active_tool)
             btn.blockSignals(False)
+
+            old_anim = self._tool_glow_anims.pop(tool, None)
+            if old_anim is not None:
+                old_anim.stop()
+            if tool == active_tool and accents_on:
+                self._tool_glow_anims[tool] = self._start_tool_glow(btn)
+            else:
+                btn.setGraphicsEffect(None)
+
+    @staticmethod
+    def _start_tool_glow(btn: QToolButton) -> QPropertyAnimation:
+        # Constructed with btn as its parent, not QGraphicsDropShadowEffect()
+        # followed by setGraphicsEffect(effect) -- confirmed at runtime
+        # that despite setGraphicsEffect() documenting a Qt-level
+        # ownership transfer, PySide6 doesn't recognize that as a reason
+        # to keep the Python wrapper alive: without an explicit parent
+        # here, the effect was garbage-collected (and silently cleared
+        # off the button) the moment this function returned.
+        effect = QGraphicsDropShadowEffect(btn)
+        effect.setColor(QColor(_TOOL_GLOW_COLOR))
+        effect.setOffset(0, 0)
+        effect.setBlurRadius(_TOOL_GLOW_MIN_BLUR)
+        btn.setGraphicsEffect(effect)
+
+        # A single looped animation with a middle keyframe (rather than
+        # two animations played back to back, or setLoopCount() with
+        # Alternate direction) gives one smooth breathe-in/breathe-out
+        # cycle per loop with the least moving parts.
+        anim = QPropertyAnimation(effect, b"blurRadius", btn)
+        anim.setDuration(_TOOL_GLOW_PERIOD_MS)
+        anim.setKeyValueAt(0.0, _TOOL_GLOW_MIN_BLUR)
+        anim.setKeyValueAt(0.5, _TOOL_GLOW_MAX_BLUR)
+        anim.setKeyValueAt(1.0, _TOOL_GLOW_MIN_BLUR)
+        anim.setLoopCount(-1)
+        anim.start()
+        return anim
 

@@ -4,3 +4,4 @@ __pycache__/
 build/
 dist/
 uploader/photos/
+uploader/trusted_devices.json

@@ -136,6 +136,22 @@ design rationale. Landed in phases.
   a photo without fighting a fiddly freehand angle. Independent of the
   existing Shift-held hard snap to 15° increments, which is unchanged;
   hold **Alt** to rotate with no snapping at all.
+- **The phone uploader can now remember a device** — checking "Remember
+  this device" (default checked) on the PIN screen skips the PIN
+  entirely on every future visit from that phone, via a separate
+  long-lived, hashed-at-rest trust token that survives the uploader
+  restarting — the fresh-PIN-per-launch behavior for a *new* device is
+  unchanged. A **"Forget this device"** link on the gallery page revokes
+  it again, for a borrowed or shared phone.
+- **Futuristic UI accents** (Options > Settings…, default on) — a small
+  layer of motion/glow on top of the existing brass/graphite look, not a
+  replacement for it: a soft breathing glow on whichever placement tool
+  is currently armed in the Project Panel, an eased fade-in for the
+  resize/rotate handles on selection (and for docks restored after Focus
+  Mode), and softened, curved rendering for movement lines instead of
+  hard straight segments. Toggling it off reverts each of those to its
+  plain/instant equivalent — nothing is gated behind it, only the
+  animation/softening itself.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import constants as C
+from .. import settings
 from ..canvas.interactive_item import InteractiveItem
 from ..canvas.point_handle import TwoPointHandle
 from .reference_layer import ROTATION_SNAP_DEG
@@ -66,6 +67,29 @@ class FocalPointItem(InteractiveItem):
         return item
 
 
+def _smooth_polyline_path(points: list[QPointF]) -> QPainterPath:
+    """The same points as a soft curve instead of hard-angled straight
+    segments -- see settings.futuristic_accents_enabled(). Each interior
+    point becomes a quadratic-Bezier control point steering the curve
+    toward the midpoint of itself and the next point, a standard cheap
+    "smooth a polyline" trick: the path still starts and ends exactly at
+    the artist's own first/last points (never invents an endpoint), and
+    with only 2 points there's nothing to smooth, so it's identical to a
+    straight line either way.
+    """
+    path = QPainterPath(points[0])
+    if len(points) <= 2:
+        for p in points[1:]:
+            path.lineTo(p)
+        return path
+    for i in range(1, len(points) - 1):
+        control = points[i]
+        next_mid = QPointF((points[i].x() + points[i + 1].x()) / 2, (points[i].y() + points[i + 1].y()) / 2)
+        path.quadTo(control, next_mid)
+    path.lineTo(points[-1])
+    return path
+
+
 class MovementLineItem(InteractiveItem):
     """A polyline sketched by the artist to plan the eye's path through the
     composition. Dragging the whole item translates every point together.
@@ -86,10 +110,16 @@ class MovementLineItem(InteractiveItem):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         color = QColor(C.COLOR_FOCAL_SECONDARY)
         pen = QPen(color, 2, Qt.DashLine)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
-        path = QPainterPath(self._points[0])
-        for p in self._points[1:]:
-            path.lineTo(p)
+        if settings.futuristic_accents_enabled():
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            path = _smooth_polyline_path(self._points)
+        else:
+            path = QPainterPath(self._points[0])
+            for p in self._points[1:]:
+                path.lineTo(p)
         painter.drawPath(path)
         # arrowhead at the end
         if len(self._points) >= 2:

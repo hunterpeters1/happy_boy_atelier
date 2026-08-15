@@ -22,6 +22,7 @@ _AUTOSAVE_INTERVAL_KEY = "settings/autosaveIntervalMs"
 _DEFAULT_UNIT_KEY = "settings/defaultUnit"
 _DEFAULT_EXPORT_DPI_KEY = "settings/defaultExportDpi"
 _SHOW_RULERS_KEY = "settings/showRulersByDefault"
+_FUTURISTIC_ACCENTS_KEY = "settings/futuristicAccentsEnabled"
 
 # Sentinel or a real interval — 0 specifically means "autosave disabled",
 # distinct from any real millisecond interval, and never itself handed to
@@ -95,3 +96,19 @@ def show_rulers_by_default() -> bool:
 
 def set_show_rulers_by_default(value: bool) -> None:
     QSettings().setValue(_SHOW_RULERS_KEY, bool(value))
+
+
+def futuristic_accents_enabled() -> bool:
+    """Whether the small set of motion/glow accents (active-tool glow
+    pulse, handle-frame fade-in, Focus Mode's dock fade-in, softened
+    movement-line curves) are on. Purely cosmetic and never gates any
+    actual capability — every one of these has a plain, instant
+    fallback when this is off, so turning it off never removes a
+    feature, only the animation/softening around it. Defaults on: it's
+    meant to be this app's new default feel, not an opt-in experiment.
+    """
+    return _as_bool(QSettings().value(_FUTURISTIC_ACCENTS_KEY, True), True)
+
+
+def set_futuristic_accents_enabled(value: bool) -> None:
+    QSettings().setValue(_FUTURISTIC_ACCENTS_KEY, bool(value))
