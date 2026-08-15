@@ -13,8 +13,11 @@ Deliberately standalone — not part of the Happy Boy Atelier PySide6 app.
 Run with its own venv: pip install -r requirements.txt && python app.py
 """
 
+<<<<<<< HEAD
 import hashlib
 import json
+=======
+>>>>>>> origin/master
 import os
 import secrets
 import socket
@@ -51,6 +54,7 @@ THUMBNAIL_QUALITY = 82
 CONVERTED_JPEG_QUALITY = 95
 PORT = 5000
 
+<<<<<<< HEAD
 # -- "remember this device" --------------------------------------------
 # The PIN (and the Flask session it unlocks) is deliberately short-lived —
 # a fresh random PIN every process start, and app.secret_key below is
@@ -75,6 +79,8 @@ TRUSTED_DEVICES_PATH = BASE_DIR / "trusted_devices.json"
 REMEMBER_COOKIE_NAME = "hba_device"
 REMEMBER_COOKIE_MAX_AGE = 180 * 24 * 60 * 60  # ~6 months
 
+=======
+>>>>>>> origin/master
 # A manual `python app.py` run always generates its own random PIN. When
 # launched by the desktop app instead (Help > Upload From Phone…, see
 # app/dialogs/phone_upload_dialog.py), the launcher needs to know the PIN

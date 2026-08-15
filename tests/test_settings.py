@@ -22,7 +22,10 @@ def clean_settings(qapp):
     keys = [
         "settings/autosaveIntervalMs", "settings/defaultUnit",
         "settings/defaultExportDpi", "settings/showRulersByDefault",
+<<<<<<< HEAD
         "settings/futuristicAccentsEnabled",
+=======
+>>>>>>> origin/master
     ]
     for key in keys:
         QSettings().remove(key)
@@ -36,7 +39,10 @@ def test_defaults_when_nothing_set(clean_settings):
     assert settings.default_unit() == "in"
     assert settings.default_export_dpi() == 300
     assert settings.show_rulers_by_default() is True
+<<<<<<< HEAD
     assert settings.futuristic_accents_enabled() is True
+=======
+>>>>>>> origin/master
 
 
 def test_autosave_interval_round_trips(clean_settings):
@@ -93,6 +99,7 @@ def test_show_rulers_by_default_handles_string_backed_bool(clean_settings):
     assert settings.show_rulers_by_default() is False
     QSettings().setValue("settings/showRulersByDefault", "true")
     assert settings.show_rulers_by_default() is True
+<<<<<<< HEAD
 
 
 def test_futuristic_accents_round_trips(clean_settings):
@@ -107,3 +114,5 @@ def test_futuristic_accents_handles_string_backed_bool(clean_settings):
     assert settings.futuristic_accents_enabled() is False
     QSettings().setValue("settings/futuristicAccentsEnabled", "true")
     assert settings.futuristic_accents_enabled() is True
+=======
+>>>>>>> origin/master
