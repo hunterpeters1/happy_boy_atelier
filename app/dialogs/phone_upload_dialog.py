@@ -124,14 +124,10 @@ class PhoneUploadDialog(QDialog):
             "Scan the QR code (or type the URL) on a phone on the same WiFi "
             "network, then enter the PIN. Uploaded photos appear in the "
             "Reference Library automatically. Closing this window stops "
-<<<<<<< HEAD
             "the upload server.\n\n"
             "First time on this phone? Check \"Remember this device\" on the "
             "PIN screen — it'll skip straight to the upload page on every "
             "future visit, no new PIN needed."
-=======
-            "the upload server."
->>>>>>> origin/master
         )
         hint.setProperty("role", "hint")
         hint.setWordWrap(True)

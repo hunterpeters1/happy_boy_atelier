@@ -136,7 +136,6 @@ design rationale. Landed in phases.
   a photo without fighting a fiddly freehand angle. Independent of the
   existing Shift-held hard snap to 15° increments, which is unchanged;
   hold **Alt** to rotate with no snapping at all.
-<<<<<<< HEAD
 - **The phone uploader can now remember a device** — checking "Remember
   this device" (default checked) on the PIN screen skips the PIN
   entirely on every future visit from that phone, via a separate
@@ -153,8 +152,6 @@ design rationale. Landed in phases.
   hard straight segments. Toggling it off reverts each of those to its
   plain/instant equivalent — nothing is gated behind it, only the
   animation/softening itself.
-=======
->>>>>>> origin/master
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

@@ -649,7 +649,6 @@ main app without ever importing from it:
   calls `refresh()` when something actually changed, so an idle poll
   tick never disrupts the panel's current scroll position/selection.
 
-<<<<<<< HEAD
 - **"Remember this device" (`uploader/app.py`)**: a deliberately separate
   trust layer bolted on top of the PIN/session model, not an extension of
   it. The PIN and the Flask session it unlocks stay short-lived by
@@ -678,8 +677,6 @@ main app without ever importing from it:
   is gitignored, same as `uploader/photos/` — it's a per-artist local
   store, not something to commit.
 
-=======
->>>>>>> origin/master
 ## Project templates (`app/project_templates.py`)
 
 A named `{width, height, unit, guides}` starting point for New Painting —
@@ -750,7 +747,6 @@ restart.
 `SettingsDialog` follows `NewProjectDialog`/`ExportDialog`'s own
 accept/reject convention: fields seed from current settings, and only
 Save (not Cancel) writes anything back.
-<<<<<<< HEAD
 
 `settings.py`'s fifth preference, `futuristic_accents_enabled()` (default
 on), gates the motion/glow accents documented in the next section.
@@ -824,8 +820,6 @@ constructors here take the target widget explicitly
 (`QGraphicsDropShadowEffect(btn)` / `QGraphicsOpacityEffect(dock)`) for
 exactly this reason — dropping the explicit parent silently breaks the
 effect with no exception raised anywhere.
-=======
->>>>>>> origin/master
 
 ## Current scope
 

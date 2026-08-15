@@ -22,10 +22,7 @@ _AUTOSAVE_INTERVAL_KEY = "settings/autosaveIntervalMs"
 _DEFAULT_UNIT_KEY = "settings/defaultUnit"
 _DEFAULT_EXPORT_DPI_KEY = "settings/defaultExportDpi"
 _SHOW_RULERS_KEY = "settings/showRulersByDefault"
-<<<<<<< HEAD
 _FUTURISTIC_ACCENTS_KEY = "settings/futuristicAccentsEnabled"
-=======
->>>>>>> origin/master
 
 # Sentinel or a real interval — 0 specifically means "autosave disabled",
 # distinct from any real millisecond interval, and never itself handed to
@@ -99,7 +96,6 @@ def show_rulers_by_default() -> bool:
 
 def set_show_rulers_by_default(value: bool) -> None:
     QSettings().setValue(_SHOW_RULERS_KEY, bool(value))
-<<<<<<< HEAD
 
 
 def futuristic_accents_enabled() -> bool:
@@ -116,5 +112,3 @@ def futuristic_accents_enabled() -> bool:
 
 def set_futuristic_accents_enabled(value: bool) -> None:
     QSettings().setValue(_FUTURISTIC_ACCENTS_KEY, bool(value))
-=======
->>>>>>> origin/master

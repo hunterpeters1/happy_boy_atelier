@@ -250,7 +250,6 @@ Mode, a developer theme with extra debug tools.
 
 - **Options > Settings…** — a few standard defaults you can customize:
   autosave interval (or turn it off entirely), the unit New Painting
-<<<<<<< HEAD
   starts with, the DPI Export starts with, whether new windows show
   rulers by default, and Futuristic UI accents (below). All are pure
   workflow preferences — nothing here is saved into any painting, and
@@ -271,18 +270,6 @@ restored after Focus Mode), and softened, curved rendering for movement
 lines instead of hard straight segments. Every one of these has a plain,
 instant equivalent when the setting is off — nothing is gated behind it,
 only the animation/softening around it.
-=======
-  starts with, the DPI Export starts with, and whether new windows show
-  rulers by default. All four are pure workflow preferences — nothing
-  here is saved into any painting, and changing one only affects what
-  happens *next* (a future New Painting, a future Export, a future
-  autosave tick), never anything already open or already exported.
-  Autosave changes take effect immediately; the others apply the next
-  time that dialog/window opens.
-- **Options > Upload From Phone…** — see below.
-- **Options > About Happy Boy Atelier** shows the app's version and
-  mission statement.
->>>>>>> origin/master
 
 ## Upload from phone
 
@@ -296,7 +283,6 @@ open — closing it just stops the upload server. (First time only: this
 needs the uploader's own dependencies installed once — see below if it
 tells you they're missing.)
 
-<<<<<<< HEAD
 Check **"Remember this device"** on the PIN screen (checked by default)
 and that phone skips straight past the PIN on every future visit — no
 re-entering a new PIN each time the uploader is relaunched. This is a
@@ -306,8 +292,6 @@ fresh PIN for any new device pairing). Using a borrowed or shared phone?
 Leave the box unchecked, or tap **"Forget this device"** at the bottom of
 the upload page afterward to revoke it again.
 
-=======
->>>>>>> origin/master
 If you'd rather run it by hand (or the in-app launcher can't find its
 dependencies yet), `uploader/` is also a small standalone tool with its
 own venv:
