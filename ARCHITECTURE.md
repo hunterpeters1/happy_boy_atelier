@@ -628,6 +628,35 @@ main app without ever importing from it:
   built exe lands at `<repo root>/dist/Happy Boy Atelier.exe` — one level
   below the repo root, with `uploader/` a sibling of `dist/`.
 
+- **Stale-server recovery** (`PhoneUploadDialog._attempt_stale_server_recovery()`,
+  `uploader/app.py`'s `/internal/shutdown` route): "port 5000 already in
+  use" in practice is overwhelmingly a leftover uploader process from a
+  previous session that didn't shut down cleanly (killed via Task
+  Manager, a crash) rather than an unrelated app — but the dialog used to
+  just fail with no recovery path once that happened. Now, before
+  showing that failure, `_handle_startup_failure()` makes exactly one
+  attempt (`self._recovery_attempted`, `self._launch_settled` guard
+  against `errorOccurred`/`finished`/the grace-period timer all firing
+  for the same failed launch) to `POST` `http://127.0.0.1:5000/internal/shutdown`
+  via `QNetworkAccessManager` — no PySide6 dependency added, `QtNetwork`
+  already ships with the base `PySide6` wheel. That route
+  (`uploader/app.py`) is deliberately unauthenticated (a new instance
+  has no way to know an old instance's PIN — that's the entire problem
+  being solved) but restricted to loopback callers (`request.remote_addr`),
+  so a phone on the LAN can never reach it even by guessing the URL; it
+  spawns a background thread that `os._exit(0)`s after a short delay,
+  not the classic `request.environ["werkzeug.server.shutdown"]` hook,
+  since that was removed from newer werkzeug versions and a hard exit
+  needs nothing from that API to work identically across versions. Only
+  a `{"ok": true}` JSON response from that exact route counts as
+  "recovered" (`_on_recovery_reply()`) — a connection refused (nothing
+  listening), a timeout, or any other response (an old build without the
+  route, or a genuinely unrelated service on port 5000) falls straight
+  through to the original failure message unchanged. Nothing here
+  inspects or kills anything at the OS/PID level — nothing about this
+  mechanism can ever touch a process other than a real instance of this
+  exact tool answering its own route.
+
 - **Getting uploads into the library live**: `library.sync_from_uploader()`
   scans `uploader_photos_dir()` for files not yet in the library index
   and imports each one through the exact same `add_image()` path a

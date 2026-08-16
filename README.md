@@ -315,6 +315,15 @@ the same network segment — some WiFi mesh systems and phone privacy
 settings can put a phone on an isolated subnet that can't reach the
 laptop.
 
+**"Port 5000 is busy"?** This almost always means a previous uploader
+process is still running — the app was closed via Task Manager, crashed,
+or a manual `python app.py` run was left open in a terminal — not a real
+conflict with some other program. The dialog now detects this itself and
+tries to shut the leftover copy down and retry automatically before
+showing an error; if you still see the error message afterward, port
+5000 is genuinely held by something else, and closing that (or checking
+Task Manager for a leftover `python.exe`) is the fix.
+
 ## Status
 
 **v1.0.0** was the last tagged release, covering the full MVP workflow.

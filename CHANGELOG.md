@@ -152,6 +152,15 @@ design rationale. Landed in phases.
   hard straight segments. Toggling it off reverts each of those to its
   plain/instant equivalent — nothing is gated behind it, only the
   animation/softening itself.
+- **The phone uploader now recovers on its own from "port 5000 is
+  busy"** — previously a dead end (close the dialog, hunt down the
+  leftover process by hand, try again), now the dialog automatically
+  asks whatever's holding that port to identify itself and step aside
+  before showing an error, and retries once. This only ever succeeds
+  against a genuine previous copy of this exact tool (a fresh, hard exit
+  the new instance requests over a loopback-only connection) — an
+  unrelated app on port 5000 is left alone, and you still get the
+  original error message in that case.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 
