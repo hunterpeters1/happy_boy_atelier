@@ -65,7 +65,7 @@ from ..canvas.undo_commands import SetPerspectiveModeCommand, SetPropertyCommand
 _TOOL_GLOW_COLOR = C.COLOR_BRASS_BRIGHT
 _TOOL_GLOW_MIN_BLUR = 6.0
 _TOOL_GLOW_MAX_BLUR = 18.0
-_TOOL_GLOW_PERIOD_MS = 1800
+_TOOL_GLOW_PERIOD_MS = 3000
 from ..layers.reference_layer import ReferenceImageItem
 from ..layers.composition_layer import FocalPointItem, MeasurementItem, MovementLineItem, NoteItem
 from ..layers.lighting_layer import LightSourceItem, DirectionArrowItem

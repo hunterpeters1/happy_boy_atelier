@@ -796,7 +796,7 @@ capability, only the animation/softening around it.
   armed (`_sync_tool_buttons()`) gets a `QGraphicsDropShadowEffect` with
   no offset — a glow, not a drop shadow — whose `blurRadius` a looped
   `QPropertyAnimation` breathes between `_TOOL_GLOW_MIN_BLUR` and
-  `_TOOL_GLOW_MAX_BLUR` over `_TOOL_GLOW_PERIOD_MS` (a slow ~1.8s cycle,
+  `_TOOL_GLOW_MAX_BLUR` over `_TOOL_GLOW_PERIOD_MS` (a slow ~3s cycle,
   deliberately not fast/bright — this sits next to a button someone may
   click repeatedly while placing several markers). `_sync_tool_buttons()`
   tracks one animation per tool in `self._tool_glow_anims`, stopping and
