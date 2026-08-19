@@ -791,20 +791,22 @@ elsewhere in this document stays intact. Everything here is gated by
 instant fallback when it's off — turning it off never removes a
 capability, only the animation/softening around it.
 
-- **Active-tool glow pulse** (`app/panels/layers_panel.py`,
-  `_start_tool_glow()`): whichever placement-tool button is currently
-  armed (`_sync_tool_buttons()`) gets a `QGraphicsDropShadowEffect` with
-  no offset — a glow, not a drop shadow — whose `blurRadius` a looped
-  `QPropertyAnimation` breathes between `_TOOL_GLOW_MIN_BLUR` and
-  `_TOOL_GLOW_MAX_BLUR` over `_TOOL_GLOW_PERIOD_MS` (a slow ~3s cycle,
+- **Active-tool glow pulse** (`app/panels/tool_glow.py`'s `start_tool_glow()`,
+  shared by `LayersPanel._sync_tool_buttons()` and
+  `SwatchesPanel._sync_eyedropper_button()`): whichever placement-tool
+  button is currently armed gets a `QGraphicsDropShadowEffect` with no
+  offset — a glow, not a drop shadow — whose `blurRadius` a looped
+  `QPropertyAnimation` breathes between `TOOL_GLOW_MIN_BLUR` and
+  `TOOL_GLOW_MAX_BLUR` over `TOOL_GLOW_PERIOD_MS` (a slow ~3s cycle,
   deliberately not fast/bright — this sits next to a button someone may
-  click repeatedly while placing several markers). `_sync_tool_buttons()`
-  tracks one animation per tool in `self._tool_glow_anims`, stopping and
-  dropping the previous tool's before starting the new one; `refresh_structure()`
-  clears that dict outright since `tree.clear()` is about to destroy the
-  buttons those animations targeted anyway (Qt would stop/delete them
-  along with their parent button regardless — this just drops the
-  now-stale Python references).
+  click repeatedly while placing several markers). Each panel tracks its
+  own animation(s) and stops/drops the previous one before starting a
+  new one — `LayersPanel._tool_glow_anims` (one per tool; cleared
+  outright in `refresh_structure()`, since `tree.clear()` is about to
+  destroy the buttons those animations targeted anyway — Qt would stop/
+  delete them along with their parent button regardless, this just drops
+  the now-stale Python references) and `SwatchesPanel._eyedropper_glow_anim`
+  (just the one button).
 - **Handle-frame fade-in** (`app/canvas/handle_frame.py`,
   `HandleFrame.set_active()`): the corner/rotate handles fade in via a
   `QVariantAnimation` (0 → 1 opacity, `OutCubic`, ~140ms) when a new item

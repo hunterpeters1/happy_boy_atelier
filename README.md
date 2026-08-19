@@ -127,10 +127,10 @@ Each imported photo is its own object:
   judging light/dark values without color. Same display-only behavior as
   Study Blur, and stacks with it. **Edit > Toggle Value Check (All
   References)** flips every visible image at once.
-- **Eyedropper** — a tool button in the Project Panel's Reference
-  section. Hover any reference image to read its color live in the
-  **Swatches** dock (hex, RGB, and a value/luminance percentage); click
-  to pin a color to a per-project palette.
+- **Eyedropper** — a tool button at the top of the **Swatches** dock,
+  right above where its own output shows up. Hover any reference image
+  to read its color live (hex, RGB, and a value/luminance percentage);
+  click to pin a color to a per-project palette.
 
 ### Composition tools
 

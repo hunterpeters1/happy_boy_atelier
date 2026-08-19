@@ -161,6 +161,11 @@ design rationale. Landed in phases.
   the new instance requests over a loopback-only connection) — an
   unrelated app on port 5000 is left alone, and you still get the
   original error message in that case.
+- **The eyedropper button moved to the Swatches dock** — it now sits
+  right above the live color readout it drives, instead of in the
+  Project Panel's Reference section underneath Import. Arming it (or any
+  other placement tool) now also correctly un-arms whichever one was
+  active in the *other* dock, which wasn't guaranteed before.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

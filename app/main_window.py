@@ -369,7 +369,10 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, _fit)
 
     def _on_tool_finished(self) -> None:
-        self.layers_panel._sync_tool_buttons(None)
+        # No direct _sync_tool_buttons(None) call here -- set_active_tool()
+        # (which every tool-completion path calls right before emitting
+        # tool_finished) already fires active_tool_changed, which every
+        # tool-button-holding panel wires to itself.
         self._update_status_hint()
 
     def _on_undo_index_changed(self, _index: int) -> None:

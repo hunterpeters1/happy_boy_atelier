@@ -27,14 +27,13 @@ assigned as ascending list-index (see e.g. ReferenceLayerGroup._reassign_z).
 from __future__ import annotations
 
 from PySide6.QtCore import QPropertyAnimation, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QDoubleSpinBox,
     QFrame,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -55,17 +54,7 @@ from .. import scrollbars
 from .. import settings
 from ..constants import LayerKind, PerspectiveMode
 from ..canvas.undo_commands import SetPerspectiveModeCommand, SetPropertyCommand
-
-# Slow, low-amplitude "breathing" glow on the currently-armed placement
-# tool -- see settings.futuristic_accents_enabled(). Kept as a small
-# glow (QGraphicsDropShadowEffect with no offset, not a real drop
-# shadow) rather than a fast/bright pulse: this sits next to a button
-# someone is about to click repeatedly while placing several markers, so
-# it needs to read as "this is live" without being distracting.
-_TOOL_GLOW_COLOR = C.COLOR_BRASS_BRIGHT
-_TOOL_GLOW_MIN_BLUR = 6.0
-_TOOL_GLOW_MAX_BLUR = 18.0
-_TOOL_GLOW_PERIOD_MS = 3000
+from .tool_glow import start_tool_glow
 from ..layers.reference_layer import ReferenceImageItem
 from ..layers.composition_layer import FocalPointItem, MeasurementItem, MovementLineItem, NoteItem
 from ..layers.lighting_layer import LightSourceItem, DirectionArrowItem
@@ -433,6 +422,17 @@ class LayersPanel(QWidget):
         outer.addWidget(self.tree, 1)
         install_row_hover(self.tree)
 
+        # Keeps this panel's own tool buttons in sync with the active tool
+        # no matter what changed it -- a click on one of these buttons
+        # (_activate_tool()), SwatchesPanel's eyedropper button, Escape,
+        # or auto-clearing after a one-shot placement all funnel through
+        # CanvasScene.set_active_tool(), the single choke point that
+        # signal fires from. Wired here (not by MainWindow after
+        # construction) so this panel is self-consistent on its own, the
+        # same self-wiring SwatchesPanel already does for its own scene
+        # signals.
+        scene.active_tool_changed.connect(self._sync_tool_buttons)
+
         self.refresh_structure()
 
     # -- structural rebuild -------------------------------------------------
@@ -733,9 +733,12 @@ class LayersPanel(QWidget):
         self._set_row_widget(row, 0, widget)
         self._span_full_width(row)
 
-        self._add_tool_row(parent, [
-            ("eyedropper", "eyedropper", "Sample a color from a reference image"),
-        ])
+        # The eyedropper tool button lives in the Swatches panel instead of
+        # here -- see SwatchesPanel's own docstring: it arms the same
+        # scene.set_active_tool("eyedropper") this row's other buttons use,
+        # but its *output* (the live readout, pinned swatches) only ever
+        # shows up in Swatches, so the trigger and destination are now in
+        # the same place rather than split across two docks.
 
         # Reversed: the layer group's own list is back-to-front (index 0 =
         # bottom of the stack), but the row order here should read
@@ -982,7 +985,14 @@ class LayersPanel(QWidget):
         new_tool = None if current == tool else tool
         self.scene.set_active_tool(new_tool)
         self.tool_selected.emit(new_tool or "")
-        self._sync_tool_buttons(new_tool)
+        # No direct _sync_tool_buttons() call here -- set_active_tool()
+        # above already emits active_tool_changed, which __init__ wired
+        # straight to it. That's also what keeps this panel's buttons in
+        # sync when the *active* tool changes for a reason that has
+        # nothing to do with this panel at all -- SwatchesPanel's own
+        # eyedropper button, Escape, or auto-clearing after a one-shot
+        # placement (MainWindow._on_tool_finished()) -- one signal, every
+        # tool-button-holding panel listens for itself.
 
     def _sync_tool_buttons(self, active_tool: str | None) -> None:
         accents_on = settings.futuristic_accents_enabled()
@@ -995,35 +1005,7 @@ class LayersPanel(QWidget):
             if old_anim is not None:
                 old_anim.stop()
             if tool == active_tool and accents_on:
-                self._tool_glow_anims[tool] = self._start_tool_glow(btn)
+                self._tool_glow_anims[tool] = start_tool_glow(btn)
             else:
                 btn.setGraphicsEffect(None)
-
-    @staticmethod
-    def _start_tool_glow(btn: QToolButton) -> QPropertyAnimation:
-        # Constructed with btn as its parent, not QGraphicsDropShadowEffect()
-        # followed by setGraphicsEffect(effect) -- confirmed at runtime
-        # that despite setGraphicsEffect() documenting a Qt-level
-        # ownership transfer, PySide6 doesn't recognize that as a reason
-        # to keep the Python wrapper alive: without an explicit parent
-        # here, the effect was garbage-collected (and silently cleared
-        # off the button) the moment this function returned.
-        effect = QGraphicsDropShadowEffect(btn)
-        effect.setColor(QColor(_TOOL_GLOW_COLOR))
-        effect.setOffset(0, 0)
-        effect.setBlurRadius(_TOOL_GLOW_MIN_BLUR)
-        btn.setGraphicsEffect(effect)
-
-        # A single looped animation with a middle keyframe (rather than
-        # two animations played back to back, or setLoopCount() with
-        # Alternate direction) gives one smooth breathe-in/breathe-out
-        # cycle per loop with the least moving parts.
-        anim = QPropertyAnimation(effect, b"blurRadius", btn)
-        anim.setDuration(_TOOL_GLOW_PERIOD_MS)
-        anim.setKeyValueAt(0.0, _TOOL_GLOW_MIN_BLUR)
-        anim.setKeyValueAt(0.5, _TOOL_GLOW_MAX_BLUR)
-        anim.setKeyValueAt(1.0, _TOOL_GLOW_MIN_BLUR)
-        anim.setLoopCount(-1)
-        anim.start()
-        return anim
 
