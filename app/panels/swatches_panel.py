@@ -29,12 +29,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import constants as C
 from .. import icons
 from .. import settings
 from .tool_glow import start_tool_glow
 
 _CHIP_ICON_PX = 14
-_EYEDROPPER_ICON_PX = 26
 
 
 def _value_percent(color: QColor) -> int:
@@ -81,8 +81,8 @@ class SwatchesPanel(QWidget):
         tool_row = QHBoxLayout()
         self._eyedropper_btn = QToolButton()
         self._eyedropper_btn.setProperty("role", "compact")
-        self._eyedropper_btn.setIconSize(QSize(_EYEDROPPER_ICON_PX, _EYEDROPPER_ICON_PX))
-        self._eyedropper_btn.setIcon(icons.icon("eyedropper", _EYEDROPPER_ICON_PX))
+        self._eyedropper_btn.setIconSize(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
+        self._eyedropper_btn.setIcon(icons.icon("eyedropper", C.TOOL_ROW_ICON_PX))
         self._eyedropper_btn.setCheckable(True)
         self._eyedropper_btn.setAutoRaise(True)
         self._eyedropper_btn.setToolTip("Sample a color from a reference image")
