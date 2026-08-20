@@ -632,8 +632,9 @@ class MainWindow(QMainWindow):
     def _fade_dock_in(dock: QDockWidget) -> None:
         # dock passed as the constructor's parent, not
         # QGraphicsOpacityEffect() + setGraphicsEffect(effect) after --
-        # see the matching comment on layers_panel.py's _start_tool_glow:
-        # confirmed at runtime that without an explicit parent here,
+        # see the matching comment in app/panels/tool_glow.py's
+        # start_tool_glow(): confirmed at runtime that without an
+        # explicit parent here,
         # PySide6 garbage-collects the effect (silently clearing it off
         # the dock) the moment this function returns, despite
         # setGraphicsEffect() supposedly transferring ownership.
