@@ -197,6 +197,25 @@ design rationale. Landed in phases.
   the floor live at launch (`LayersPanel._compute_minimum_width()`)
   against the actual running font/style, and grows automatically if
   those differ. Covered by two new tests.
+- **Phone uploader: instant per-photo preview tiles while uploading** —
+  picking or dropping a batch of photos now shows every tile immediately
+  (a spinner over a downscaled local preview), instead of a single
+  "Uploading 2 / 8…" text line with nothing to look at until the whole
+  batch finishes. The local preview is generated via
+  `createImageBitmap`'s resize option, which decodes and downscales in
+  one step — the browser never has to hold a full decode of a 12-48MP
+  phone photo just to paint a ~100px tile, which is what a plain
+  `URL.createObjectURL(file)` on an `<img>` would force. Falls back to
+  that plain approach only where `createImageBitmap` isn't available at
+  all. Each tile swaps to the real server-rendered thumbnail once its
+  own upload finishes, or shows a small error badge if it failed,
+  without interrupting the rest of the batch. The actual network upload
+  stays sequential, unchanged. Caught and fixed one real race along the
+  way: the periodic gallery poll (every 3s, for photos other devices
+  upload) could see a file the server had just saved before this page's
+  own upload call for that exact file had finished and recorded it,
+  producing a duplicate tile — now suppressed for the duration of any
+  upload this page itself has in flight.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

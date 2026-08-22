@@ -30,6 +30,7 @@
       --ink-dim: #9a9d9f;
       --brass: #c9a05c;
       --brass-bright: #e0b876;
+      --error: #d16a5a;
     }
     * { box-sizing: border-box; }
     body {
@@ -103,17 +104,59 @@
     }
     .gallery a {
       display: block;
+      position: relative;
       aspect-ratio: 1 / 1;
       border-radius: 2px;
       overflow: hidden;
       border: 1px solid var(--line);
       background: var(--bg-panel);
     }
+    .gallery a.pending { pointer-events: none; }
+    .gallery a.errored { border-color: var(--error); }
     .gallery img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .gallery img.loaded { opacity: 1; }
+    /* Overlay for the two transient tile states (uploading / failed) --
+       absent entirely once a tile settles into its normal done state, so
+       a finished tile is pixel-identical to one rendered from a plain
+       server poll (see the "why two code paths would drift" note in the
+       script below). A genuinely circular spinner, in line with this
+       app's own convention (theme.py: only actually-round controls get
+       full border-radius, everything else stays near-sharp at 2px). */
+    .tile-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(21, 23, 26, 0.55);
+    }
+    .spinner {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid var(--line);
+      border-top-color: var(--brass);
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .tile-error-badge {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--error);
+      color: var(--bg);
+      font-size: 0.85rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .empty {
       text-align: center;
@@ -161,42 +204,191 @@
     const emptyStateEl = document.getElementById("emptyState");
     const forgetDeviceBtn = document.getElementById("forgetDeviceBtn");
 
-    forgetDeviceBtn.addEventListener("click", async () => {
-      if (!confirm("Forget this device? You'll need the PIN again next time.")) return;
-      await fetch("/forget-device", { method: "POST" });
-      window.location.href = "/login";
-    });
+    // Filenames already represented as a tile in the DOM -- either one of
+    // our own uploads that finished, or one refreshGallery() found on a
+    // poll. Lets refreshGallery() (which runs every 3s, from any device
+    // on this session) add tiles for photos *other* phones just uploaded
+    // without ever touching -- or duplicating -- a tile already on
+    // screen, including one still mid-upload that the server doesn't
+    // know about yet.
+    const knownFilenames = new Set();
+
+    // Guards refreshGallery() against the race described in its own
+    // comment below -- non-zero for the whole duration of any batch this
+    // page is actively uploading.
+    let uploadsInFlight = 0;
+
+    function updateEmptyState() {
+      emptyStateEl.hidden = galleryEl.children.length > 0;
+    }
+
+    function insertTileAtFront(el) {
+      galleryEl.insertBefore(el, galleryEl.firstChild);
+      updateEmptyState();
+    }
+
+    // A tile is always the same markup whether it came from a server poll
+    // (createDoneTile) or from our own in-flight upload settling
+    // (buildPendingTile's completion path) -- a finished upload must be
+    // pixel-identical to a plain server-rendered one, not a permanently
+    // different "just uploaded" style, or the two code paths would
+    // visibly drift from each other over time.
+    function createDoneTile(filename, thumbnail) {
+      const link = document.createElement("a");
+      link.href = `/photos_dir/${encodeURIComponent(filename)}`;
+      link.target = "_blank";
+      link.rel = "noopener";
+
+      const img = document.createElement("img");
+      img.src = thumbnail
+        ? `/thumbnails/${encodeURIComponent(thumbnail)}`
+        : `/photos_dir/${encodeURIComponent(filename)}`;
+      img.loading = "lazy";
+      img.alt = filename;
+      img.addEventListener("load", () => img.classList.add("loaded"));
+
+      link.appendChild(img);
+      return link;
+    }
+
+    // Downscaled local preview, generated entirely client-side, so a
+    // tile can appear the instant a photo is picked instead of waiting
+    // on the upload round-trip. createImageBitmap's resize option decodes
+    // *and* downscales in one step -- the browser never has to hold a
+    // full decode of a 12-48MP phone photo just to paint a ~100px tile,
+    // which is what plain `URL.createObjectURL(file)` on an <img> would
+    // do. Falls back to that plain approach only where createImageBitmap
+    // isn't available at all (broadly supported on the mobile Safari/
+    // Chrome this page actually targets) -- worse for a moment on that
+    // one path, never worse than what this page already did before.
+    const PREVIEW_PX = 160;
+
+    async function makeLocalPreview(file) {
+      if ("createImageBitmap" in window) {
+        try {
+          const bitmap = await createImageBitmap(file, { resizeWidth: PREVIEW_PX, resizeQuality: "medium" });
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          canvas.getContext("2d").drawImage(bitmap, 0, 0);
+          bitmap.close();
+          // A data URL, not a blob URL -- a few KB of string, nothing to
+          // revoke, unlike the full-resolution fallback below.
+          return { src: canvas.toDataURL("image/jpeg", 0.7), revoke: null };
+        } catch (err) {
+          // Fall through to the fallback below (e.g. a format
+          // createImageBitmap can't decode on this browser).
+        }
+      }
+      const src = URL.createObjectURL(file);
+      return { src, revoke: src };
+    }
+
+    function buildPendingTile() {
+      const link = document.createElement("a");
+      link.classList.add("pending");
+
+      const img = document.createElement("img");
+      link.appendChild(img);
+
+      const overlay = document.createElement("div");
+      overlay.className = "tile-overlay";
+      const spinner = document.createElement("div");
+      spinner.className = "spinner";
+      overlay.appendChild(spinner);
+      link.appendChild(overlay);
+
+      return { link, img, overlay };
+    }
+
+    async function settleTile(tile, file) {
+      const { link, img, overlay } = tile;
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const response = await fetch("/upload", { method: "POST", body: formData });
+        const data = await response.json();
+        if (data.ok) {
+          knownFilenames.add(data.filename);
+          link.href = `/photos_dir/${encodeURIComponent(data.filename)}`;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.classList.remove("pending");
+          if (data.thumbnail) {
+            // The small server-rendered thumbnail replaces our local
+            // preview once it exists -- no reason to keep holding even
+            // the downscaled preview once the real thing is available.
+            img.classList.remove("loaded");
+            img.src = `/thumbnails/${encodeURIComponent(data.thumbnail)}`;
+            img.addEventListener("load", () => img.classList.add("loaded"), { once: true });
+          }
+          if (link._revokePreview) URL.revokeObjectURL(link._revokePreview);
+          overlay.remove();
+          return true;
+        }
+        throw new Error(data.error || "Upload failed.");
+      } catch (err) {
+        link.classList.remove("pending");
+        link.classList.add("errored");
+        overlay.innerHTML = "";
+        const badge = document.createElement("div");
+        badge.className = "tile-error-badge";
+        badge.textContent = "!";
+        badge.title = "Upload failed";
+        overlay.appendChild(badge);
+        return false;
+      }
+    }
 
     async function uploadFiles(files) {
       const list = Array.from(files);
       if (list.length === 0) return;
 
+      // Every tile for the whole batch appears immediately, in the
+      // order the files were picked -- not one at a time as each
+      // upload starts. anchor is captured once, before any inserting:
+      // insertBefore(newTile, anchor) against that same fixed node,
+      // repeated in file order, builds the new block in the right
+      // order while still landing it entirely ahead of whatever tiles
+      // already existed.
+      const anchor = galleryEl.firstChild;
+      const tiles = list.map((file) => {
+        const tile = buildPendingTile();
+        galleryEl.insertBefore(tile.link, anchor);
+        // Preview decode and the eventual upload proceed independently
+        // -- every preview starts decoding right away, in parallel
+        // across the whole batch (cheap: it's a downscaled decode, see
+        // makeLocalPreview), well before this file's own turn in the
+        // sequential upload loop below.
+        makeLocalPreview(file).then(({ src, revoke }) => {
+          tile.img.src = src;
+          tile.img.addEventListener("load", () => tile.img.classList.add("loaded"), { once: true });
+          tile.link._revokePreview = revoke;
+        });
+        return tile;
+      });
+      updateEmptyState();
+
       let succeeded = 0;
       let failed = 0;
       statusEl.textContent = `Uploading 0 / ${list.length}...`;
 
-      for (let i = 0; i < list.length; i++) {
-        const formData = new FormData();
-        formData.append("file", list[i]);
-        try {
-          const response = await fetch("/upload", { method: "POST", body: formData });
-          const data = await response.json();
-          if (data.ok) {
-            succeeded++;
-          } else {
-            failed++;
-          }
-        } catch (err) {
-          failed++;
+      uploadsInFlight++;
+      try {
+        // Actual network upload stays sequential, one at a time -- gentle
+        // on a phone's uplink, unchanged from before this feature.
+        for (let i = 0; i < list.length; i++) {
+          const ok = await settleTile(tiles[i], list[i]);
+          if (ok) succeeded++; else failed++;
+          statusEl.textContent = `Uploading ${i + 1} / ${list.length}...`;
         }
-        statusEl.textContent = `Uploading ${i + 1} / ${list.length}...`;
+      } finally {
+        uploadsInFlight--;
       }
 
       statusEl.textContent = failed === 0
         ? `${succeeded} photo${succeeded === 1 ? "" : "s"} uploaded.`
         : `${succeeded} uploaded, ${failed} failed.`;
-
-      refreshGallery();
     }
 
     fileInput.addEventListener("change", () => {
@@ -224,33 +416,42 @@
       }
     });
 
-    function renderGallery(photos) {
-      galleryEl.innerHTML = "";
-      emptyStateEl.hidden = photos.length > 0;
+    forgetDeviceBtn.addEventListener("click", async () => {
+      if (!confirm("Forget this device? You'll need the PIN again next time.")) return;
+      await fetch("/forget-device", { method: "POST" });
+      window.location.href = "/login";
+    });
 
-      for (const photo of photos) {
-        const link = document.createElement("a");
-        link.href = `/photos_dir/${encodeURIComponent(photo.filename)}`;
-        link.target = "_blank";
-        link.rel = "noopener";
-
-        const img = document.createElement("img");
-        img.src = photo.thumbnail
-          ? `/thumbnails/${encodeURIComponent(photo.thumbnail)}`
-          : `/photos_dir/${encodeURIComponent(photo.filename)}`;
-        img.loading = "lazy";
-        img.alt = photo.filename;
-
-        link.appendChild(img);
-        galleryEl.appendChild(link);
-      }
-    }
-
+    // Only ever adds tiles for photos this page doesn't already know
+    // about (another device's upload) -- never rebuilds the grid, so it
+    // can't clobber a tile that's still mid-upload locally. Server order
+    // is newest-first; walked in reverse so each still-new insert-at-
+    // front leaves the final DOM order newest-first too.
+    //
+    // Skipped entirely while our own upload is in flight (uploadsInFlight,
+    // set in uploadFiles()) -- a real race otherwise: the server has
+    // already written the file to disk (so /photos reports it) before
+    // this page's own fetch("/upload") for that exact file has resolved
+    // and added its filename to knownFilenames, so a poll landing in
+    // that window saw it as "unseen" and inserted a second tile for a
+    // photo that was about to get its own pending tile marked done --
+    // caught by an automated test exercising this with an artificial
+    // upload delay, not by inspection.
     async function refreshGallery() {
+      if (uploadsInFlight > 0) return;
       try {
         const response = await fetch("/photos");
         const photos = await response.json();
-        renderGallery(photos);
+        const unseen = photos.filter((p) => !knownFilenames.has(p.filename));
+        for (const photo of unseen.reverse()) {
+          knownFilenames.add(photo.filename);
+          insertTileAtFront(createDoneTile(photo.filename, photo.thumbnail));
+        }
+        // Still needed even when unseen is empty -- insertTileAtFront()
+        // only runs (and so only calls this) when something was actually
+        // added, but "zero photos, first poll ever" must still flip
+        // emptyStateEl on, which nothing else does for it.
+        updateEmptyState();
       } catch (err) {
         // Next poll tick will retry.
       }
