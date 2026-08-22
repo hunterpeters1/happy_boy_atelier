@@ -2,12 +2,12 @@
 
 **From:** Senior Engineer
 **To:** Hunter (Art Director), ChatGPT (Producer/Product Designer)
-**Status:** Phase 0 and most of Phase 1 below are now shipped (unreleased,
-see `CHANGELOG.md`) — this document's original assessment and phase plan
-are kept below as the historical record they were written as, with a
-status note against every item. **Section 7, added after the fact, is
-the current forward-looking roadmap** — read that first if you just want
-"what's next."
+**Status:** Phases 0 through 4 below have now all shipped in some form
+(unreleased, see `CHANGELOG.md`) — this document's original assessment and
+phase plan are kept below as the historical record they were written as,
+with a status note against every item. **Section 7, added after the fact
+and kept up to date since, is the current forward-looking roadmap** — read
+that first if you just want "what's next."
 
 This was the first deliverable requested before any V2 code got written: an
 honest read on what v1.0 actually was under the hood, what that meant for
@@ -192,21 +192,25 @@ infrastructure to do move/edit actions correctly.*
   direct in-place edge-handle manipulation, no Crop…/Apply/Cancel
   buttons or crop mode to enter/exit.
 
-### Phase 2 — Precision Tools for Traditional Painters — 🟨 partial
+### Phase 2 — Precision Tools for Traditional Painters — ✅ done, one item still open
 *Directly serves the "prepare before you paint" mission; each is additive,
 doesn't touch existing layers.*
 
-- ⬜ On-canvas ruler / angle measurement tool — not started, carried into
-  Section 7
-- 🟨 Snapping — angle snap on rotate (Shift, 15°) ✅ and reference-image
-  center-to-center/center-to-canvas-center snapping shipped, but *not*
-  the rule-of-thirds/golden-ratio-intersection snapping this line
-  originally proposed, nor true edge-to-edge (vs. center) snapping —
-  both carried into Section 7
-- ⬜ Non-destructive grayscale/value-check toggle for the reference layer
-  — not started, carried into Section 7
+- ✅ On-canvas ruler / angle measurement tool — `MeasurementItem`
+  (`app/layers/composition_layer.py`), placed via the existing two-click
+  tool pattern; reports length and angle from horizontal in one placed
+  segment.
+- ✅ Snapping — angle snap on rotate (Shift, 15°), reference-image
+  center-to-center/center-to-canvas-center snapping, rule-of-thirds/
+  golden-ratio-intersection snapping, and true edge-to-edge (not just
+  center-to-center) snapping have all shipped
+  (`ReferenceImageItem._snap_position()`).
+- ✅ Non-destructive grayscale/value-check toggle for the reference layer
+  — per-image `grayscale_amount()` field (same shape as Blur/Line
+  Clarity) plus a `toggle_grayscale_all()` macro for the whole reference
+  set at once.
 - ⬜ Optional: user-defined custom grid spacing beyond thirds/golden ratio
-  — not started (the *perspective* grid already had custom spacing
+  — still not started (the *perspective* grid already had custom spacing
   before this doc was written; this item is specifically about the
   Guides layer's two fixed overlays)
 
@@ -314,18 +318,29 @@ selection model, replacing Qt's, since `QGraphicsItem.setSelected()`
 never stuck for children of these `QGraphicsItemGroup` layers).
 
 ### Carried forward from Sections 4–6, still genuinely open
-- On-canvas ruler/angle measurement tool (Phase 2)
-- Non-destructive grayscale/value-check toggle (Phase 2)
-- Rule-of-thirds/golden-ratio-intersection snapping, and true edge-to-
-  edge (not just center-to-center) reference-image snapping
 - Reference-image memory footprint / proxy-resolution strategy (Section
-  1, Section 5 item 2) — still genuinely unvalidated
+  1, Section 5 item 2) — still genuinely unvalidated: no one has actually
+  loaded a realistic reference set (a few dozen 12+ MP phone/DSLR photos)
+  and measured real memory usage. The display-proxy cache
+  (`_get_display_pixmap()`) fixed the *speed* problem this caused; the
+  *memory* question — full-resolution `_source_pixmap`s for every
+  reference held simultaneously — was never separately checked.
 - Multiple open projects/tabs (Phase 4) — still gated on Section 6 item
   5; templates and the color eyedropper have since shipped (see Section
   7's Phase 4 status above)
 - Installer vs. portable exe (Section 6 item 2) — still open, and more
   pointed now that the build path is a manual command sequence by firm
   policy rather than a placeholder
+- User-defined custom grid spacing beyond thirds/golden ratio (Phase 2's
+  one remaining item) — not started
+- Bundled "critique pack" export (canvas render + planning notes, zipped
+  for a mentor, without handing over the live editable project) — see
+  the note under Batch export presets below; a preset gets partway there
+  today but there's no separate zip-bundle export format
+
+All other Phase 2 items (measurement tool, grayscale/value-check toggle,
+rule-of-thirds/golden-ratio-intersection snapping, true edge-to-edge
+snapping) have since shipped — see Phase 2's status above.
 
 ### New, discovered while implementing the phases above
 Each of these was a deliberate, explicitly-flagged scope cut in its
@@ -358,16 +373,18 @@ phase's own commit — not an oversight — kept here so they aren't lost:
   format.
 
 ### A concrete next phase, if picking one
-Given what's already landed, the highest-leverage next slice is probably
-**"Phase 2, finished"**: the on-canvas measurement tool and the
-grayscale/value-check toggle are the two items this document's own
-Section 2 called out as scoring unusually well against the "does this
-help an artist create better or faster" test and *not yet started* —
-both are additive (don't touch existing layers), both fit the existing
-`InteractiveItem`/undo-stack/Project-Panel infrastructure directly, and
-neither is gated on an unanswered open question the way Phases 3–4 are.
-Section 6 items 1, 4, and 5 are still worth getting explicit answers on
-before scoping Phases 3–4, same as originally proposed.
+Phase 2 (the section this used to point to) is now done. Of what's left
+in the "still genuinely open" list above, the reference-image memory
+footprint check is the highest-leverage next move: it's not a new
+feature, just an honest measurement (load a realistic reference set,
+watch actual memory usage) that turns a five-year-old unvalidated
+assumption into either "confirmed fine" or "here's the actual fix
+needed" — cheaper to check now than to debug later as an unexplained
+"the app got slow" report. After that, the bundled critique-pack export
+is the next-best content feature (small, additive, no open design
+questions blocking it), while the installer-vs-portable-exe and
+multi-project-tabs questions (Section 6 items 2 and 5) still need an
+explicit answer from Hunter before either gets scoped.
 
 ---
 
