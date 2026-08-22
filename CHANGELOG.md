@@ -177,6 +177,14 @@ design rationale. Landed in phases.
   and the intent behind it, and drops the "never a paint program, never
   an AI image generator" disclaimer entirely; that's implicit, not
   something a painter opening the About box needs spelled out for them.
+- **Made the phone uploader's web page match the rest of the brand** —
+  it now sets the same "HB" monogram as its favicon, embeds the app's
+  own bundled Space Grotesk variable font instead of falling back to the
+  browser's system sans-serif, and tightens its `border-radius` from
+  6px/4px down to the real app's own 2px convention
+  (`app/theme.py`'s actual `QLineEdit`/`QPushButton` radius — only
+  genuinely circular controls get fully round corners there). No Python
+  changes; served entirely through Flask's default `static/` folder.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

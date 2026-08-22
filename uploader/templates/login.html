@@ -4,10 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Upload From Phone</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
   <style>
     /* Same brass/graphite instrument-panel palette as the desktop app
        itself (app/constants.py's dark-mode values) -- see index.html's
-       matching comment. */
+       matching comment. Same typeface too (Space Grotesk, the app's own
+       bundled UI font, also used in the app icon's "HB" mark) -- colors
+       alone tied this page to the app, but the lettering itself didn't
+       until now. Variable font, so one @font-face covers every weight
+       used below via plain `font-weight` instead of one static file per
+       weight. */
+    @font-face {
+      font-family: "Space Grotesk";
+      src: url("{{ url_for('static', filename='fonts/SpaceGrotesk-VariableFont_wght.ttf') }}") format("truetype-variations");
+      font-weight: 300 700;
+    }
     :root {
       color-scheme: dark;
       --bg: #15171a;
@@ -25,7 +36,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: var(--bg);
       color: var(--ink);
       padding: 24px;
@@ -50,7 +61,11 @@
       letter-spacing: 0.35em;
       text-align: center;
       padding: 12px;
-      border-radius: 6px;
+      /* 2px, not a rounder value -- matches the real app's own
+         QLineEdit/QPushButton radius (app/theme.py); only actually
+         circular controls (a dial, a radio button) get fully round
+         corners there. */
+      border-radius: 2px;
       border: 1px solid var(--line);
       background: var(--bg-panel);
       color: var(--brass-bright);
@@ -65,7 +80,7 @@
       font-weight: 600;
       letter-spacing: 0.02em;
       padding: 12px;
-      border-radius: 6px;
+      border-radius: 2px;
       border: 1px solid var(--brass);
       background: var(--brass);
       color: #1b1e0e;
