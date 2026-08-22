@@ -185,6 +185,14 @@ design rationale. Landed in phases.
   (`app/theme.py`'s actual `QLineEdit`/`QPushButton` radius — only
   genuinely circular controls get fully round corners there). No Python
   changes; served entirely through Flask's default `static/` folder.
+- **Fixed clipped "Reference"/"Composition"/"Perspective" labels in the
+  Project Panel** — its minimum width (328px) was sized for the widest
+  *item* row, but the layer header rows use a larger bold font that
+  needed more room than that left column 0, so the three longest layer
+  names rendered with a trailing "…" cut-off at the panel's default
+  size. Bumped the floor to 420px, re-measured the same way column 1's
+  width already was (build a real panel, read `sizeHintForColumn(0)`
+  back at each width).
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

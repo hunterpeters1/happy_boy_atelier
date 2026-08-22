@@ -346,10 +346,21 @@ class LayersPanel(QWidget):
         # button strip (see setColumnWidth(1, ...) below) plus indentation/
         # icon overhead leaves room for, and item names (reference
         # filenames especially) got crushed down to a couple of characters.
-        # Sized for the widest realistic row (an item row: indent + icon +
-        # reorder up/down + eye + lock) with enough left over in column 0
-        # for a legible chunk of a name.
-        self.setMinimumWidth(328)
+        # 328 originally sized this for the widest *item* row (indent +
+        # icon + reorder up/down + eye + lock), but the layer header rows
+        # (_build_layer()) set a larger 13pt bold font for their label,
+        # which needs more width, not less — at 328 the three longest
+        # labels ("Reference", "Composition", "Perspective") got clipped
+        # (a real bug reported after this shipped: sizeHintForColumn(0)
+        # measured 195px needed there against only ~150-157px actually
+        # available). Re-measured the same way column 1's 169px was: build
+        # a real LayersPanel, refresh_structure(), and read
+        # tree.sizeHintForColumn(0) back at each width to find where it
+        # stops being the bottleneck — 405px was the first value where
+        # column 0's actual width caught up to what it needs; this is that
+        # plus headroom for font-metric differences between this dev
+        # machine and the real Windows Segoe UI render.
+        self.setMinimumWidth(420)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 6, 6, 6)
