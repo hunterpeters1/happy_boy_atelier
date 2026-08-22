@@ -2,9 +2,8 @@
 
 A digital drafting table for traditional painters. Plan a physical
 painting before you touch the canvas: choose a format, arrange reference
-photos, and work out composition, perspective, and lighting. It's not a
-painting app and not an image generator — every mark on the canvas is
-placed by the artist.
+photos, and work out composition, perspective, and lighting until every
+decision feels settled — then take it to the easel.
 
 See `ARCHITECTURE.md` for the technical design.
 
