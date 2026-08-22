@@ -71,11 +71,18 @@ originally written.)*
   across four files hand-roll the same `mousePressEvent` override +
   selection call. → unified into `InteractiveItem`
   (`app/canvas/interactive_item.py`).
-- ⬜ **Still open.** No performance validation with real reference photo
-  sizes. Full-resolution `QPixmap`s are held in memory per reference
-  image with no proxy/thumbnail strategy for on-screen display. Fine for
-  a handful of moderate images; untested for what an artist actually
-  imports (a dozen 12+ MP phone photos). Carried into Section 7.
+- 🟡 **Mitigated, not measured.** No performance validation with real
+  reference photo sizes ever happened — full-resolution `QPixmap`s are
+  still held in memory per reference image with no proxy/thumbnail
+  strategy for the *stored* copy (only the on-screen display proxy is
+  downscaled). Rather than measure it, the decision was to bound the
+  worst case instead: reference images are now hard-capped at 15 per
+  project (`MAX_REFERENCE_IMAGES`, `app/constants.py`) — this app plans
+  a painting with a handful of references, not a bulk photo library, so
+  an unbounded count was never actually needed. The per-image memory
+  cost itself is still exactly as unvalidated as it always was; what's
+  changed is that the total exposure now has a firm ceiling instead of
+  being open-ended. See Section 7.
 - ✅ **Shipped, further than proposed.** ~~The Layers panel does two
   jobs.~~ Simultaneously a layer visibility/lock tree and a tool palette,
   reading like a debug panel. → rebuilt as the Project Panel: a real
@@ -249,10 +256,14 @@ UI upgrade plan's own Section D.
    Phase 0 adds more direct-mutation call sites if we don't fix this
    first. This is the main argument for Phase 0 being first, not a
    "someday" item.
-2. **Reference image memory footprint is unvalidated.** No proxy/preview
-   resolution strategy exists yet. Worth a deliberate look once
-   real-world photo sets get tested — I'd rather flag this now than have
-   it surface as "the app got slow" after Phase 2 ships.
+2. **Reference image memory footprint is unvalidated — now bounded
+   instead.** No proxy/preview resolution strategy exists for the
+   *stored* full-resolution copy. Rather than measure real-world photo
+   sets, the project count itself is now hard-capped at 15 per project
+   (see Section 1's matching note) — a deliberate "bound the worst case"
+   choice instead of "characterize the actual cost." Worth revisiting if
+   a future feature needs more than 15 references per project, since the
+   underlying per-image cost still hasn't actually been measured.
 3. **Packaging fragility is a real cost, not a one-time annoyance.**
    Every future release repeats the icon/`--add-data`/`--collect-all`
    debugging unless the build script is fixed once and reused. — ✅
@@ -319,12 +330,15 @@ never stuck for children of these `QGraphicsItemGroup` layers).
 
 ### Carried forward from Sections 4–6, still genuinely open
 - Reference-image memory footprint / proxy-resolution strategy (Section
-  1, Section 5 item 2) — still genuinely unvalidated: no one has actually
-  loaded a realistic reference set (a few dozen 12+ MP phone/DSLR photos)
-  and measured real memory usage. The display-proxy cache
-  (`_get_display_pixmap()`) fixed the *speed* problem this caused; the
-  *memory* question — full-resolution `_source_pixmap`s for every
-  reference held simultaneously — was never separately checked.
+  1, Section 5 item 2) — **bounded, not resolved.** A hard 15-image
+  per-project cap now exists (`MAX_REFERENCE_IMAGES`), so the worst case
+  is no longer unbounded, but the underlying question — what a realistic
+  reference set (a dozen-plus 12+ MP phone/DSLR photos) actually costs
+  in memory — was never measured and still hasn't been. The display-proxy
+  cache (`_get_display_pixmap()`) fixed the *speed* problem this caused;
+  the *memory* question for the stored full-resolution copy remains open
+  in principle, just capped in practice. Worth an actual measurement pass
+  if 15 ever turns out to be too tight a ceiling.
 - Multiple open projects/tabs (Phase 4) — still gated on Section 6 item
   5; templates and the color eyedropper have since shipped (see Section
   7's Phase 4 status above)
@@ -371,20 +385,39 @@ phase's own commit — not an oversight — kept here so they aren't lost:
   over the live editable project) is still open — a preset can get you
   most of the way there today, but there's no separate zip-bundle export
   format.
+- **Reference-image cap (15 per project)** — ✅ done
+  (`MAX_REFERENCE_IMAGES`, `app/constants.py`), enforced at
+  `MainWindow._import_image_paths()`, the one entry point the Import
+  dialog, OS drag-and-drop, and the Library panel's drag-in all already
+  shared. Grew directly out of the memory-footprint risk above — see
+  Section 1/5's updated notes — plus a plain judgment call that this app
+  was never meant to manage a bulk photo library. All-or-nothing: an
+  import that would exceed the cap is refused entirely, not silently
+  truncated. A pre-existing project that already exceeds 15 (predating
+  the cap, or hand-edited) still opens and loads every image untouched —
+  the cap only ever blocks new imports.
+- **Phone uploader hardening and polish** — ✅ done, three related
+  pieces, all in `uploader/`: (1) instant per-photo preview tiles while
+  uploading, using `createImageBitmap`'s resize option so the browser
+  never decodes a full 12-48MP phone photo just to paint a ~100px tile;
+  (2) the same 15-item cap philosophy applied to a single upload batch,
+  refused outright rather than truncated; (3) real visual identity for
+  both the login and gallery pages — an "instrument panel" card, the
+  same corner-rivet hardware motif the desktop app uses on its canvas
+  and dock title bars, and the actual "HB" app icon rendered large as a
+  proper logo instead of only ever appearing tiny as a favicon.
 
 ### A concrete next phase, if picking one
-Phase 2 (the section this used to point to) is now done. Of what's left
-in the "still genuinely open" list above, the reference-image memory
-footprint check is the highest-leverage next move: it's not a new
-feature, just an honest measurement (load a realistic reference set,
-watch actual memory usage) that turns a five-year-old unvalidated
-assumption into either "confirmed fine" or "here's the actual fix
-needed" — cheaper to check now than to debug later as an unexplained
-"the app got slow" report. After that, the bundled critique-pack export
-is the next-best content feature (small, additive, no open design
-questions blocking it), while the installer-vs-portable-exe and
-multi-project-tabs questions (Section 6 items 2 and 5) still need an
-explicit answer from Hunter before either gets scoped.
+Phase 2 (the section this used to point to) is now done, and the
+memory-footprint risk that used to top this list is bounded by the new
+15-image cap rather than measured — good enough for now, not fully
+closed out (see Section 5 item 2's updated note). Of what's left, the
+bundled critique-pack export is the best next content feature: small,
+additive, and not gated on any open design question the way the
+remaining items are. The installer-vs-portable-exe and multi-project-
+tabs questions (Section 6 items 2 and 5) still need an explicit answer
+from Hunter before either gets scoped — neither is a "just build it"
+item.
 
 ---
 
