@@ -166,6 +166,13 @@ design rationale. Landed in phases.
   Project Panel's Reference section underneath Import. Arming it (or any
   other placement tool) now also correctly un-arms whichever one was
   active in the *other* dock, which wasn't guaranteed before.
+- **New app icon** — a redrawn "HB" monogram (`make_icon.py`, brass on
+  the same dark-graphite tile the rest of the app's chrome uses), set in
+  the app's own bundled Space Grotesk Bold, with four small corner
+  rivets as its one accent — the same hardware motif already used on the
+  canvas corners and dock title bars, not a new decoration. Replaces the
+  earlier photo-crop painted-face icon, which didn't hold up at taskbar
+  sizes.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 
