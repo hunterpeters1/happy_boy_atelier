@@ -924,13 +924,35 @@ class MainWindow(QMainWindow):
         self._import_image_paths(paths)
 
     def _import_image_paths(self, paths: list[str]) -> None:
-        """Shared by the Import dialog and CanvasView's OS drag-and-drop
-        (there was previously no way to import except the file dialog).
-        A multi-file import is now one undo step, not one per file —
+        """Shared by the Import dialog, CanvasView's OS drag-and-drop, and
+        the Library panel's drag-in (there was previously no way to
+        import except the file dialog) — the one choke point every
+        reference-image import goes through, which is why
+        MAX_REFERENCE_IMAGES is enforced here and nowhere else. A
+        multi-file import is now one undo step, not one per file —
         matching how multi-delete already batches into a single macro.
         """
         if self.scene is None or not paths:
             return
+
+        existing_count = len(self.scene.reference_layer.items())
+        available = C.MAX_REFERENCE_IMAGES - existing_count
+        if available <= 0:
+            QMessageBox.warning(
+                self, "Reference Limit Reached",
+                f"This project already has {C.MAX_REFERENCE_IMAGES} reference images, "
+                f"the most this app supports per project. Remove one before importing more.",
+            )
+            return
+        if len(paths) > available:
+            QMessageBox.warning(
+                self, "Too Many Reference Images",
+                f"This project has room for {available} more reference image"
+                f"{'s' if available != 1 else ''} (a {C.MAX_REFERENCE_IMAGES}-image cap per "
+                f"project). Pick {available} or fewer and try again.",
+            )
+            return
+
         rect = self.scene.canvas_rect()
         center = rect.center()
         cascade = 0

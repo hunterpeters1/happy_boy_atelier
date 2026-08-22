@@ -189,3 +189,12 @@ RIVET_RADIUS_PX = 2.0
 # window (see the grab()-based verification note in the git history for
 # why offscreen rendering isn't trusted for this kind of judgment call).
 TOOL_ROW_ICON_PX = 26
+
+# This app is for planning composition with a handful of references, not
+# managing a bulk photo library -- enforced only at the import entry
+# point (MainWindow._import_image_paths()), never inside
+# ReferenceLayerGroup itself, so it can't retroactively touch an older
+# project that already has more than this (undo/redo and .atelier
+# loading both go through add_existing()/load_from_dict() directly,
+# neither of which checks this).
+MAX_REFERENCE_IMAGES = 15

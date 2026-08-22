@@ -222,6 +222,17 @@ design rationale. Landed in phases.
   now refused outright (with a status message naming both the limit and
   how many were selected), rather than silently accepted. The drop
   zone's own hint text now states the limit up front.
+- **Reference images capped at 15 per project** — this app plans a
+  painting with a handful of references, not a bulk photo library.
+  Enforced at the one shared import entry point
+  (`MainWindow._import_image_paths()`, used by the Import dialog, OS
+  drag-and-drop, and the Library panel's drag-in alike), all-or-nothing
+  like the uploader's own batch cap: an import that would push the
+  project over 15 is refused entirely, with a message stating the room
+  actually left. A project that already exceeds 15 (from before this
+  cap existed, or a hand-edited `.atelier` file) still opens and loads
+  every image untouched — the cap only ever blocks new imports, never
+  reaches into loading or undo/redo.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 
