@@ -216,6 +216,12 @@ design rationale. Landed in phases.
   own upload call for that exact file had finished and recorded it,
   producing a duplicate tile — now suppressed for the duration of any
   upload this page itself has in flight.
+- **Phone uploader: capped a single batch at 15 photos** — this page is
+  a companion for planning a handful of references, not a bulk
+  photo-transfer tool, so picking or dropping more than 15 at once is
+  now refused outright (with a status message naming both the limit and
+  how many were selected), rather than silently accepted. The drop
+  zone's own hint text now states the limit up front.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

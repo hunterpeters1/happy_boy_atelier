@@ -185,7 +185,7 @@
 
   <label class="drop-zone" id="dropZone" for="fileInput">
     <span class="big">Tap to choose photos</span>
-    <span class="small">or drag and drop here</span>
+    <span class="small">or drag and drop here &middot; up to 15 at a time</span>
     <input type="file" id="fileInput" accept="image/*" multiple>
   </label>
 
@@ -340,9 +340,22 @@
       }
     }
 
+    // This page is a companion for planning a handful of reference
+    // photos, not a bulk photo-transfer tool -- a hard cap, not just a
+    // performance nicety, keeps a batch from silently turning into
+    // exactly the "mass import" this app isn't meant for. Enforced here
+    // (refusing the whole batch, not silently dropping the tail past 15)
+    // so nothing about which photos "made it" is left ambiguous.
+    const MAX_BATCH_SIZE = 15;
+
     async function uploadFiles(files) {
       const list = Array.from(files);
       if (list.length === 0) return;
+
+      if (list.length > MAX_BATCH_SIZE) {
+        statusEl.textContent = `Pick up to ${MAX_BATCH_SIZE} at a time (selected ${list.length}).`;
+        return;
+      }
 
       // Every tile for the whole batch appears immediately, in the
       // order the files were picked -- not one at a time as each
