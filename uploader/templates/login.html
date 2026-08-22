@@ -41,9 +41,50 @@
       color: var(--ink);
       padding: 24px;
     }
+    /* The "instrument panel plate" this page's content sits on, instead
+       of floating loose on bare background -- same framing idea as a
+       dock title bar or the canvas rect in the real app, just rendered
+       in HTML/CSS. Corner rivets are the same hardware motif as the
+       real app's canvas corners and dock title bars (neutral --line
+       color there too, not brass -- rivets read as structural, not
+       interactive). */
+    .panel {
+      position: relative;
+      width: 100%;
+      max-width: 340px;
+      background: var(--bg-panel);
+      border: 1px solid var(--line);
+      border-radius: 2px;
+      padding: 32px 24px 24px;
+    }
+    .rivet {
+      position: absolute;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--line);
+    }
+    .rivet.tl { top: 10px; left: 10px; }
+    .rivet.tr { top: 10px; right: 10px; }
+    .rivet.bl { bottom: 10px; left: 10px; }
+    .rivet.br { bottom: 10px; right: 10px; }
+    .logo {
+      display: block;
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 10px;
+    }
+    .brand {
+      text-align: center;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--brass);
+      margin-bottom: 22px;
+    }
     form {
       width: 100%;
-      max-width: 320px;
       display: flex;
       flex-direction: column;
       gap: 14px;
@@ -103,23 +144,31 @@
   </style>
 </head>
 <body>
-  <form method="post" action="{{ url_for('login') }}">
-    <h1>Enter the PIN shown on the laptop</h1>
-    {% if error %}<p class="error">{{ error }}</p>{% endif %}
-    <input
-      type="text"
-      name="pin"
-      inputmode="numeric"
-      pattern="[0-9]*"
-      maxlength="6"
-      autocomplete="off"
-      autofocus
-      required>
-    <label class="remember">
-      <input type="checkbox" name="remember" checked>
-      Remember this device — skip the PIN next time
-    </label>
-    <button type="submit">Unlock</button>
-  </form>
+  <div class="panel">
+    <div class="rivet tl"></div>
+    <div class="rivet tr"></div>
+    <div class="rivet bl"></div>
+    <div class="rivet br"></div>
+    <img class="logo" src="{{ url_for('static', filename='logo.png') }}" alt="">
+    <div class="brand">Happy Boy Atelier</div>
+    <form method="post" action="{{ url_for('login') }}">
+      <h1>Enter the PIN shown on the laptop</h1>
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
+      <input
+        type="text"
+        name="pin"
+        inputmode="numeric"
+        pattern="[0-9]*"
+        maxlength="6"
+        autocomplete="off"
+        autofocus
+        required>
+      <label class="remember">
+        <input type="checkbox" name="remember" checked>
+        Remember this device — skip the PIN next time
+      </label>
+      <button type="submit">Unlock</button>
+    </form>
+  </div>
 </body>
 </html>

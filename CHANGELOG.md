@@ -233,6 +233,16 @@ design rationale. Landed in phases.
   cap existed, or a hand-edited `.atelier` file) still opens and loads
   every image untouched — the cap only ever blocks new imports, never
   reaches into loading or undo/redo.
+- **Gave the phone uploader's pages real visual identity instead of
+  bare form fields on a plain background** — both pages now frame
+  their content in an "instrument panel" card (bordered plate, hairline
+  edge, the same brass/graphite the rest of this page already used),
+  with the same four corner rivets used on the canvas and dock title
+  bars in the desktop app, and the actual "HB" app icon rendered large
+  as a proper logo above a small brand line, rather than only ever
+  appearing tiny as a favicon. The upload page's drop zone also gained
+  a real upload-arrow icon instead of being text-only. No functional
+  changes — same IDs, same script, verified end-to-end with Playwright.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

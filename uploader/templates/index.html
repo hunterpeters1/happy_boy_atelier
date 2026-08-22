@@ -40,10 +40,52 @@
       color: var(--ink);
       padding: 16px;
     }
-    h1 {
-      font-size: 1rem;
+    /* The "instrument panel plate" this page's content sits on, instead
+       of floating loose on bare background -- same framing idea as a
+       dock title bar or the canvas rect in the real app, just rendered
+       in HTML/CSS. Corner rivets are the same hardware motif as the
+       real app's canvas corners and dock title bars (neutral --line
+       color there too, not brass -- rivets read as structural, not
+       interactive). See login.html's matching comment. */
+    .panel {
+      position: relative;
+      max-width: 480px;
+      margin: 0 auto;
+      background: var(--bg-panel);
+      border: 1px solid var(--line);
+      border-radius: 2px;
+      padding: 28px 20px 20px;
+    }
+    .rivet {
+      position: absolute;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--line);
+    }
+    .rivet.tl { top: 10px; left: 10px; }
+    .rivet.tr { top: 10px; right: 10px; }
+    .rivet.bl { bottom: 10px; left: 10px; }
+    .rivet.br { bottom: 10px; right: 10px; }
+    .logo {
+      display: block;
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 8px;
+    }
+    .brand {
+      text-align: center;
+      font-size: 0.68rem;
       font-weight: 600;
-      letter-spacing: 0.02em;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--brass);
+      margin-bottom: 4px;
+    }
+    h1 {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: var(--ink-dim);
       margin: 0 0 4px;
       text-align: center;
     }
@@ -65,7 +107,7 @@
          circular controls (a dial, a radio button) get fully round
          corners there. Same reasoning below for the gallery thumbnails. */
       border-radius: 2px;
-      background: var(--bg-panel);
+      background: var(--bg-raised);
       padding: 28px 16px;
       text-align: center;
       cursor: pointer;
@@ -74,6 +116,12 @@
     .drop-zone.dragover { border-color: var(--brass); background: var(--bg-raised); }
     .drop-zone .big { font-size: 1.05rem; font-weight: 600; }
     .drop-zone .small { font-size: 0.85rem; color: var(--ink-dim); }
+    .upload-icon {
+      width: 32px;
+      height: 32px;
+      color: var(--brass);
+      margin-bottom: 2px;
+    }
     /* Visually hidden but still rendered -- iOS Safari can fall back to
        a bare Files browser (no Photo Library/Camera option) if the file
        input is display:none when its label is tapped. */
@@ -180,21 +228,35 @@
   </style>
 </head>
 <body>
-  <h1>Happy Boy Atelier &mdash; Upload From Phone</h1>
-  <div class="rule"></div>
+  <div class="panel">
+    <div class="rivet tl"></div>
+    <div class="rivet tr"></div>
+    <div class="rivet bl"></div>
+    <div class="rivet br"></div>
+    <img class="logo" src="{{ url_for('static', filename='logo.png') }}" alt="">
+    <div class="brand">Happy Boy Atelier</div>
+    <h1>Upload From Phone</h1>
+    <div class="rule"></div>
 
-  <label class="drop-zone" id="dropZone" for="fileInput">
-    <span class="big">Tap to choose photos</span>
-    <span class="small">or drag and drop here &middot; up to 15 at a time</span>
-    <input type="file" id="fileInput" accept="image/*" multiple>
-  </label>
+    <label class="drop-zone" id="dropZone" for="fileInput">
+      <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3v12"/>
+        <path d="M7 8l5-5 5 5"/>
+        <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
+      </svg>
+      <span class="big">Tap to choose photos</span>
+      <span class="small">or drag and drop here &middot; up to 15 at a time</span>
+      <input type="file" id="fileInput" accept="image/*" multiple>
+    </label>
 
-  <p class="status" id="status"></p>
+    <p class="status" id="status"></p>
 
-  <div class="gallery" id="gallery"></div>
-  <p class="empty" id="emptyState" hidden>No photos yet.</p>
+    <div class="gallery" id="gallery"></div>
+    <p class="empty" id="emptyState" hidden>No photos yet.</p>
 
-  <button type="button" class="forget-device" id="forgetDeviceBtn">Forget this device</button>
+    <button type="button" class="forget-device" id="forgetDeviceBtn">Forget this device</button>
+  </div>
 
   <script>
     const fileInput = document.getElementById("fileInput");
