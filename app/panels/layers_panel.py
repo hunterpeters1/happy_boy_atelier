@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QSlider,
     QSpinBox,
+    QStyle,
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -322,6 +323,15 @@ class _ReorderableTree(QTreeWidget):
 class LayersPanel(QWidget):
     request_import = Signal()
 
+    # Fixed width of column 1's button strip (see setColumnWidth() below).
+    # A named constant, not a literal re-typed in two places, because
+    # _compute_minimum_width() needs this exact number and querying it
+    # back via tree.columnWidth(1) is unreliable before the tree has ever
+    # been shown/laid out (observed returning a stale pre-layout value in
+    # that window, well past 169, for reasons that didn't trace to any
+    # single embedded widget's sizeHint being wider than expected).
+    _COLUMN1_WIDTH_PX = 169
+
     def __init__(self, scene, parent=None):
         super().__init__(parent)
         self.scene = scene
@@ -340,27 +350,6 @@ class LayersPanel(QWidget):
         self._line_width_baseline: float | None = None
         self._line_width_last = 2.0
         self._perspective_opacity_baseline: float | None = None
-
-        # Mirrors PropertiesPanel.setMinimumWidth(300) — without a floor,
-        # this dock could be squeezed narrower than column 1's fixed 169px
-        # button strip (see setColumnWidth(1, ...) below) plus indentation/
-        # icon overhead leaves room for, and item names (reference
-        # filenames especially) got crushed down to a couple of characters.
-        # 328 originally sized this for the widest *item* row (indent +
-        # icon + reorder up/down + eye + lock), but the layer header rows
-        # (_build_layer()) set a larger 13pt bold font for their label,
-        # which needs more width, not less — at 328 the three longest
-        # labels ("Reference", "Composition", "Perspective") got clipped
-        # (a real bug reported after this shipped: sizeHintForColumn(0)
-        # measured 195px needed there against only ~150-157px actually
-        # available). Re-measured the same way column 1's 169px was: build
-        # a real LayersPanel, refresh_structure(), and read
-        # tree.sizeHintForColumn(0) back at each width to find where it
-        # stops being the bottleneck — 405px was the first value where
-        # column 0's actual width caught up to what it needs; this is that
-        # plus headroom for font-metric differences between this dev
-        # machine and the real Windows Segoe UI render.
-        self.setMinimumWidth(420)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 6, 6, 6)
@@ -410,7 +399,7 @@ class LayersPanel(QWidget):
         # so this must track C.TOOL_ROW_ICON_PX and _RowButtons' margins —
         # re-measure after changing either instead of hand-adjusting this
         # number.
-        self.tree.setColumnWidth(1, 169)
+        self.tree.setColumnWidth(1, self._COLUMN1_WIDTH_PX)
         self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
         outer.addWidget(self.tree, 1)
         install_row_hover(self.tree)
@@ -427,6 +416,26 @@ class LayersPanel(QWidget):
         scene.active_tool_changed.connect(self._sync_tool_buttons)
 
         self.refresh_structure()
+
+        # A floor under the dock's width, mirroring
+        # PropertiesPanel.setMinimumWidth(300) — without one, this dock
+        # could be squeezed narrower than column 1's fixed 169px button
+        # strip plus indentation/icon overhead leaves room for, crushing
+        # item names (reference filenames especially) to a couple of
+        # characters. This used to be a single hardcoded number, sized by
+        # hand-measuring on one dev machine — which broke for real users:
+        # the layer header rows (_build_layer()) use a larger 13pt bold
+        # font than item rows, so whether "Reference"/"Composition"/
+        # "Perspective" fit depends on this machine's actual Segoe UI
+        # metrics, its DPI scaling, and any Windows "make text bigger"
+        # accessibility setting — none of which this dev environment's
+        # font matches, and none of which a fixed pixel constant can track.
+        # So instead this is measured live, every launch, against the
+        # actual running font/style: sizeHintForIndex() per header row
+        # (not sizeHintForColumn(0), which would also pick up arbitrarily
+        # long item names/notes — those are *meant* to elide, per this
+        # panel's existing convention, and must not inflate the floor).
+        self.setMinimumWidth(self._compute_minimum_width())
 
     # -- structural rebuild -------------------------------------------------
     def refresh_structure(self) -> None:
@@ -479,6 +488,42 @@ class LayersPanel(QWidget):
 
         self._sync_selection_highlight()
         self._apply_search_filter()
+
+    def _compute_minimum_width(self) -> int:
+        """How wide this dock must be, at minimum, for the five layer
+        header labels to render without clipping — see the call site's
+        comment in __init__ for why this is measured instead of a fixed
+        constant. Requires refresh_structure() to have already run at
+        least once, so self._layer_rows is populated.
+        """
+        # sizeHintForIndex() covers only the delegate's own content (icon
+        # + text) -- it does NOT include the row's indentation/branch-
+        # arrow space, which the view adds separately at paint time. Found
+        # by rendering at the size this method computed without it: the
+        # sizeHint said column 0 had enough room, but "Composition" still
+        # visibly rendered elided. tree.indentation() is what was missing.
+        widest_header = self.tree.indentation() + max(
+            self.tree.sizeHintForIndex(self.tree.indexFromItem(row, 0)).width()
+            for row in self._layer_rows.values()
+        )
+        margins = self.layout().contentsMargins()
+        frame = self.tree.frameWidth() * 2
+        scrollbar = self.tree.style().pixelMetric(QStyle.PM_ScrollBarExtent)
+        # +8 safety margin: the pieces above cover every measurable
+        # contributor to column 0's real width, but leave a little room
+        # for style-level rounding this doesn't explicitly account for.
+        # Deliberately _COLUMN1_WIDTH_PX, not tree.columnWidth(1) — see
+        # that constant's docstring for why reading it back here is
+        # unreliable.
+        return (
+            margins.left()
+            + margins.right()
+            + widest_header
+            + self._COLUMN1_WIDTH_PX
+            + frame
+            + scrollbar
+            + 8
+        )
 
     @staticmethod
     def _set_row_widget(row: QTreeWidgetItem, column: int, widget: QWidget) -> None:

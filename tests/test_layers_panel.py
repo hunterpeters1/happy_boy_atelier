@@ -147,3 +147,40 @@ def test_non_reference_item_row_keeps_its_glyph_icon(qapp):
 
     row = panel._row_for_obj[id(item)]
     assert not row.icon(0).isNull()
+
+
+def test_minimum_width_fits_every_layer_header_label(qapp):
+    """Regression test for a real bug: the panel's minimum width was
+    once a hardcoded guess sized for item rows, which left the layer
+    header rows' larger bold font clipped ("Composition"/"Perspective"
+    rendered with a trailing "..."). _compute_minimum_width() must
+    guarantee column 0 is wide enough for every header label, measured
+    against the actual running font/style rather than a fixed constant.
+    """
+    scene = _scene(qapp)
+    panel = LayersPanel(scene)
+    panel.resize(panel.minimumWidth(), 600)
+    panel.show()
+
+    tree = panel.tree
+    for kind, row in panel._layer_rows.items():
+        needed = tree.indentation() + tree.sizeHintForIndex(tree.indexFromItem(row, 0)).width()
+        assert tree.columnWidth(0) >= needed, f"{kind} header label would clip at the panel's minimum width"
+
+
+def test_minimum_width_grows_with_the_header_font(qapp):
+    """The floor must track the actual rendered font, not just a fixed
+    number measured once on one machine -- this is what makes it correct
+    across different DPI scaling, font substitution, and OS text-size
+    accessibility settings, none of which can be hardcoded for in advance.
+    """
+    scene = _scene(qapp)
+    panel = LayersPanel(scene)
+    baseline = panel.minimumWidth()
+
+    for row in panel._layer_rows.values():
+        font = row.font(0)
+        font.setPointSize(font.pointSize() + 10)
+        row.setFont(0, font)
+
+    assert panel._compute_minimum_width() > baseline

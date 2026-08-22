@@ -190,9 +190,13 @@ design rationale. Landed in phases.
   *item* row, but the layer header rows use a larger bold font that
   needed more room than that left column 0, so the three longest layer
   names rendered with a trailing "…" cut-off at the panel's default
-  size. Bumped the floor to 420px, re-measured the same way column 1's
-  width already was (build a real panel, read `sizeHintForColumn(0)`
-  back at each width).
+  size. First fix attempt was a bumped hardcoded floor (420px), but a
+  fixed pixel guess measured on one dev machine isn't reliable across
+  real users' different DPI scaling, font substitution, or Windows
+  "make text bigger" accessibility settings — so this instead computes
+  the floor live at launch (`LayersPanel._compute_minimum_width()`)
+  against the actual running font/style, and grows automatically if
+  those differ. Covered by two new tests.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 
