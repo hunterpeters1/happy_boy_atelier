@@ -173,6 +173,10 @@ design rationale. Landed in phases.
   canvas corners and dock title bars, not a new decoration. Replaces the
   earlier photo-crop painted-face icon, which didn't hold up at taskbar
   sizes.
+- **Reworded the About dialog's mission line** — states what the app is
+  and the intent behind it, and drops the "never a paint program, never
+  an AI image generator" disclaimer entirely; that's implicit, not
+  something a painter opening the About box needs spelled out for them.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 
