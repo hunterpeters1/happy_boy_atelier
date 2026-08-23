@@ -154,3 +154,53 @@ def test_forget_device_without_a_remembered_cookie_is_a_safe_noop(client):
     response = client.post("/forget-device")
     assert response.status_code == 302
     assert uploader_app._trusted_hashes == set()
+
+
+# -- /internal/shutdown (PhoneUploadDialog's stale-server recovery) -------
+#
+# Every test here monkeypatches _delayed_exit() to a no-op first. The real
+# one spawns a background thread that calls os._exit(0) after a short
+# delay -- since Flask's test client runs the view function in-process,
+# leaving the real target in place would eventually kill this very test
+# process (and the whole pytest run with it) a fraction of a second after
+# the request returns, whether or not the test itself has finished.
+
+def test_internal_shutdown_rejects_non_loopback_callers(client, monkeypatch):
+    monkeypatch.setattr(uploader_app, "_delayed_exit", lambda: None)
+    response = client.post("/internal/shutdown", environ_overrides={"REMOTE_ADDR": "203.0.113.5"})
+    assert response.status_code == 403
+
+
+def test_internal_shutdown_accepts_loopback_ipv4(client, monkeypatch):
+    monkeypatch.setattr(uploader_app, "_delayed_exit", lambda: None)
+    response = client.post("/internal/shutdown", environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+    assert response.status_code == 200
+    assert response.get_json() == {"ok": True}
+
+
+def test_internal_shutdown_accepts_loopback_ipv6(client, monkeypatch):
+    monkeypatch.setattr(uploader_app, "_delayed_exit", lambda: None)
+    response = client.post("/internal/shutdown", environ_overrides={"REMOTE_ADDR": "::1"})
+    assert response.status_code == 200
+    assert response.get_json() == {"ok": True}
+
+
+def test_internal_shutdown_does_not_require_the_pin(client, monkeypatch):
+    # Deliberately reachable without a session/PIN -- see the route's own
+    # docstring for why (a new instance has no way to know an old one's
+    # PIN). The loopback-only guard above is the actual protection.
+    monkeypatch.setattr(uploader_app, "_delayed_exit", lambda: None)
+    response = client.post(
+        "/internal/shutdown", environ_overrides={"REMOTE_ADDR": "127.0.0.1"}
+    )
+    assert response.status_code == 200
+
+
+def test_internal_shutdown_schedules_the_exit_target(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(uploader_app, "_delayed_exit", lambda: calls.append(True))
+    monkeypatch.setattr(uploader_app.threading.Thread, "start", lambda self: self.run())
+
+    client.post("/internal/shutdown", environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+
+    assert calls == [True]

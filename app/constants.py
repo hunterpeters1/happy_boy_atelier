@@ -165,3 +165,36 @@ SCROLLBAR_WIDTH_PX = 8
 # two read as the same piece of hardware rather than two independently-
 # sized ones.
 RIVET_RADIUS_PX = 2.0
+
+# Compact tool-activation-button icon size — shared by every panel with
+# one of these (app/panels/layers_panel.py's placement tools,
+# app/panels/swatches_panel.py's eyedropper), so a button in one dock
+# can't quietly end up a different size than the identical-looking ones
+# in another. Bumped alongside the toolbar/tree icon bumps elsewhere for
+# legibility; was 15/16, then 17, then 20px.
+#
+# NOT sized to literally match the Perspective section's "1-pt"/"2-pt"/
+# "3-pt" QRadioButtons' sizeHint height, even though that was the original
+# ask — measured on a real (non-offscreen) QApplication, a plain
+# QRadioButton("1-pt") is only 20px tall (indicator + Segoe UI text line
+# height), while a single compact QToolButton at this constant's *previous*
+# value (20px icon) was already 31px tall — i.e. matching the radio's
+# literal height would mean *shrinking* the buttons, the opposite of what
+# was asked. The actual "these still look swallowed" complaint is ink
+# density, not bounding-box size: icons.py's glyphs are 1.5-stroke-weight
+# line art scaled uniformly with this constant (the SVG viewBox and its
+# stroke-width scale together), so a thin stroke stays proportionally thin
+# no matter how many times the box size alone gets bumped. Sized up further
+# here for real visual weight and confirmed by eye against a real running
+# window (see the grab()-based verification note in the git history for
+# why offscreen rendering isn't trusted for this kind of judgment call).
+TOOL_ROW_ICON_PX = 26
+
+# This app is for planning composition with a handful of references, not
+# managing a bulk photo library -- enforced only at the import entry
+# point (MainWindow._import_image_paths()), never inside
+# ReferenceLayerGroup itself, so it can't retroactively touch an older
+# project that already has more than this (undo/redo and .atelier
+# loading both go through add_existing()/load_from_dict() directly,
+# neither of which checks this).
+MAX_REFERENCE_IMAGES = 15

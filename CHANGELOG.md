@@ -152,6 +152,111 @@ design rationale. Landed in phases.
   hard straight segments. Toggling it off reverts each of those to its
   plain/instant equivalent — nothing is gated behind it, only the
   animation/softening itself.
+- **The phone uploader now recovers on its own from "port 5000 is
+  busy"** — previously a dead end (close the dialog, hunt down the
+  leftover process by hand, try again), now the dialog automatically
+  asks whatever's holding that port to identify itself and step aside
+  before showing an error, and retries once. This only ever succeeds
+  against a genuine previous copy of this exact tool (a fresh, hard exit
+  the new instance requests over a loopback-only connection) — an
+  unrelated app on port 5000 is left alone, and you still get the
+  original error message in that case.
+- **The eyedropper button moved to the Swatches dock** — it now sits
+  right above the live color readout it drives, instead of in the
+  Project Panel's Reference section underneath Import. Arming it (or any
+  other placement tool) now also correctly un-arms whichever one was
+  active in the *other* dock, which wasn't guaranteed before.
+- **New app icon** — a redrawn "HB" monogram (`make_icon.py`, brass on
+  the same dark-graphite tile the rest of the app's chrome uses), set in
+  the app's own bundled Space Grotesk Bold, with four small corner
+  rivets as its one accent — the same hardware motif already used on the
+  canvas corners and dock title bars, not a new decoration. Replaces the
+  earlier photo-crop painted-face icon, which didn't hold up at taskbar
+  sizes.
+- **Reworded the About dialog's mission line** — states what the app is
+  and the intent behind it, and drops the "never a paint program, never
+  an AI image generator" disclaimer entirely; that's implicit, not
+  something a painter opening the About box needs spelled out for them.
+- **Made the phone uploader's web page match the rest of the brand** —
+  it now sets the same "HB" monogram as its favicon, embeds the app's
+  own bundled Space Grotesk variable font instead of falling back to the
+  browser's system sans-serif, and tightens its `border-radius` from
+  6px/4px down to the real app's own 2px convention
+  (`app/theme.py`'s actual `QLineEdit`/`QPushButton` radius — only
+  genuinely circular controls get fully round corners there). No Python
+  changes; served entirely through Flask's default `static/` folder.
+- **Fixed clipped "Reference"/"Composition"/"Perspective" labels in the
+  Project Panel** — its minimum width (328px) was sized for the widest
+  *item* row, but the layer header rows use a larger bold font that
+  needed more room than that left column 0, so the three longest layer
+  names rendered with a trailing "…" cut-off at the panel's default
+  size. First fix attempt was a bumped hardcoded floor (420px), but a
+  fixed pixel guess measured on one dev machine isn't reliable across
+  real users' different DPI scaling, font substitution, or Windows
+  "make text bigger" accessibility settings — so this instead computes
+  the floor live at launch (`LayersPanel._compute_minimum_width()`)
+  against the actual running font/style, and grows automatically if
+  those differ. Covered by two new tests.
+- **Phone uploader: instant per-photo preview tiles while uploading** —
+  picking or dropping a batch of photos now shows every tile immediately
+  (a spinner over a downscaled local preview), instead of a single
+  "Uploading 2 / 8…" text line with nothing to look at until the whole
+  batch finishes. The local preview is generated via
+  `createImageBitmap`'s resize option, which decodes and downscales in
+  one step — the browser never has to hold a full decode of a 12-48MP
+  phone photo just to paint a ~100px tile, which is what a plain
+  `URL.createObjectURL(file)` on an `<img>` would force. Falls back to
+  that plain approach only where `createImageBitmap` isn't available at
+  all. Each tile swaps to the real server-rendered thumbnail once its
+  own upload finishes, or shows a small error badge if it failed,
+  without interrupting the rest of the batch. The actual network upload
+  stays sequential, unchanged. Caught and fixed one real race along the
+  way: the periodic gallery poll (every 3s, for photos other devices
+  upload) could see a file the server had just saved before this page's
+  own upload call for that exact file had finished and recorded it,
+  producing a duplicate tile — now suppressed for the duration of any
+  upload this page itself has in flight.
+- **Phone uploader: capped a single batch at 15 photos** — this page is
+  a companion for planning a handful of references, not a bulk
+  photo-transfer tool, so picking or dropping more than 15 at once is
+  now refused outright (with a status message naming both the limit and
+  how many were selected), rather than silently accepted. The drop
+  zone's own hint text now states the limit up front.
+- **Reference images capped at 15 per project** — this app plans a
+  painting with a handful of references, not a bulk photo library.
+  Enforced at the one shared import entry point
+  (`MainWindow._import_image_paths()`, used by the Import dialog, OS
+  drag-and-drop, and the Library panel's drag-in alike), all-or-nothing
+  like the uploader's own batch cap: an import that would push the
+  project over 15 is refused entirely, with a message stating the room
+  actually left. A project that already exceeds 15 (from before this
+  cap existed, or a hand-edited `.atelier` file) still opens and loads
+  every image untouched — the cap only ever blocks new imports, never
+  reaches into loading or undo/redo.
+- **Gave the phone uploader's pages real visual identity instead of
+  bare form fields on a plain background** — both pages now frame
+  their content in an "instrument panel" card (bordered plate, hairline
+  edge, the same brass/graphite the rest of this page already used),
+  with the same four corner rivets used on the canvas and dock title
+  bars in the desktop app, and the actual "HB" app icon rendered large
+  as a proper logo above a small brand line, rather than only ever
+  appearing tiny as a favicon. The upload page's drop zone also gained
+  a real upload-arrow icon instead of being text-only. No functional
+  changes — same IDs, same script, verified end-to-end with Playwright.
+- **First real step toward Linux support** — `PhoneUploadDialog._venv_python()`
+  now recognizes the Unix `bin/python` venv layout (macOS/Linux), not
+  just Windows' `Scripts/python.exe`; without this fix, the phone
+  uploader would always report "hasn't been set up yet" on those
+  platforms regardless of whether a venv actually existed. The uploader
+  setup instructions shown in that case also pick the right activation
+  command for the current OS instead of always showing the Windows one.
+  New `HappyBoyAtelierLinux.spec` (kept fully separate from
+  `HappyBoyAtelier.spec` so nothing about the working Windows build is
+  ever at risk) produces a Linux binary — built and smoke-tested for
+  real: launches cleanly, idles in its Qt event loop, zero runtime
+  warnings. macOS support is not part of this pass — no way to test it
+  without real hardware yet, so nothing macOS-specific was written
+  blind.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

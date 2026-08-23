@@ -85,8 +85,37 @@ silently no-ops in the frozen exe because `app_icon_path()` can't find
 PyInstaller doesn't cross-compile. `scripts/` doesn't exist — there is no
 build-helper directory, deliberately (see above); `Happy Boy Atelier.spec`
 (with spaces, an older/stale spec file this note used to tell you to
-avoid in favor of `HappyBoyAtelier.spec`) has been deleted entirely, so
-there's now only the one spec file.
+avoid in favor of `HappyBoyAtelier.spec`) has been deleted entirely.
+
+### Building the Linux binary
+
+A separate spec file, `HappyBoyAtelierLinux.spec` — not a conditional
+branch inside `HappyBoyAtelier.spec` above, so a Linux-only tweak can
+never put the working Windows build at risk. Same reasoning as the "no
+build script" decision above: keep the things that already work
+completely isolated from anything new. Same two baked-in fixes
+(`collect_all("PySide6")`, bundling `resources/`) apply, since there's
+no reason to expect Linux is exempt from either. What's different: no
+`icon=` argument at all — PyInstaller's icon embedding is a Windows
+(`.ico`)/macOS (`.icns`) concept with no equivalent inside a single ELF
+binary; a Linux desktop icon (a `.desktop` launcher file plus an icon in
+the system's icon theme) is a separate, not-yet-done piece of work.
+
+```
+pip install -r requirements-build.txt
+rm -rf dist build
+python -m PyInstaller HappyBoyAtelierLinux.spec --noconfirm
+```
+
+Output: `dist/Happy Boy Atelier` (no extension). Built and smoke-tested
+in a real Linux environment: the binary launches, sits in its Qt event
+loop, and produces zero warnings/errors at runtime. PyInstaller prints a
+long list of `Library not found` warnings during the build itself
+(`libpulse`, `libtiff`, X11/XCB libs, Wayland compositor libs, SQL driver
+libs) — all optional Qt plugin dependencies this app never exercises
+(no audio, no SQL, not a Wayland compositor), inherent to
+`collect_all("PySide6")` scanning everything PySide6 ships rather than
+just what this app uses. Harmless; not something to chase down.
 
 ## Architecture
 

@@ -628,6 +628,35 @@ main app without ever importing from it:
   built exe lands at `<repo root>/dist/Happy Boy Atelier.exe` — one level
   below the repo root, with `uploader/` a sibling of `dist/`.
 
+- **Stale-server recovery** (`PhoneUploadDialog._attempt_stale_server_recovery()`,
+  `uploader/app.py`'s `/internal/shutdown` route): "port 5000 already in
+  use" in practice is overwhelmingly a leftover uploader process from a
+  previous session that didn't shut down cleanly (killed via Task
+  Manager, a crash) rather than an unrelated app — but the dialog used to
+  just fail with no recovery path once that happened. Now, before
+  showing that failure, `_handle_startup_failure()` makes exactly one
+  attempt (`self._recovery_attempted`, `self._launch_settled` guard
+  against `errorOccurred`/`finished`/the grace-period timer all firing
+  for the same failed launch) to `POST` `http://127.0.0.1:5000/internal/shutdown`
+  via `QNetworkAccessManager` — no PySide6 dependency added, `QtNetwork`
+  already ships with the base `PySide6` wheel. That route
+  (`uploader/app.py`) is deliberately unauthenticated (a new instance
+  has no way to know an old instance's PIN — that's the entire problem
+  being solved) but restricted to loopback callers (`request.remote_addr`),
+  so a phone on the LAN can never reach it even by guessing the URL; it
+  spawns a background thread that `os._exit(0)`s after a short delay,
+  not the classic `request.environ["werkzeug.server.shutdown"]` hook,
+  since that was removed from newer werkzeug versions and a hard exit
+  needs nothing from that API to work identically across versions. Only
+  a `{"ok": true}` JSON response from that exact route counts as
+  "recovered" (`_on_recovery_reply()`) — a connection refused (nothing
+  listening), a timeout, or any other response (an old build without the
+  route, or a genuinely unrelated service on port 5000) falls straight
+  through to the original failure message unchanged. Nothing here
+  inspects or kills anything at the OS/PID level — nothing about this
+  mechanism can ever touch a process other than a real instance of this
+  exact tool answering its own route.
+
 - **Getting uploads into the library live**: `library.sync_from_uploader()`
   scans `uploader_photos_dir()` for files not yet in the library index
   and imports each one through the exact same `add_image()` path a
@@ -762,20 +791,22 @@ elsewhere in this document stays intact. Everything here is gated by
 instant fallback when it's off — turning it off never removes a
 capability, only the animation/softening around it.
 
-- **Active-tool glow pulse** (`app/panels/layers_panel.py`,
-  `_start_tool_glow()`): whichever placement-tool button is currently
-  armed (`_sync_tool_buttons()`) gets a `QGraphicsDropShadowEffect` with
-  no offset — a glow, not a drop shadow — whose `blurRadius` a looped
-  `QPropertyAnimation` breathes between `_TOOL_GLOW_MIN_BLUR` and
-  `_TOOL_GLOW_MAX_BLUR` over `_TOOL_GLOW_PERIOD_MS` (a slow ~1.8s cycle,
+- **Active-tool glow pulse** (`app/panels/tool_glow.py`'s `start_tool_glow()`,
+  shared by `LayersPanel._sync_tool_buttons()` and
+  `SwatchesPanel._sync_eyedropper_button()`): whichever placement-tool
+  button is currently armed gets a `QGraphicsDropShadowEffect` with no
+  offset — a glow, not a drop shadow — whose `blurRadius` a looped
+  `QPropertyAnimation` breathes between `TOOL_GLOW_MIN_BLUR` and
+  `TOOL_GLOW_MAX_BLUR` over `TOOL_GLOW_PERIOD_MS` (a slow ~3s cycle,
   deliberately not fast/bright — this sits next to a button someone may
-  click repeatedly while placing several markers). `_sync_tool_buttons()`
-  tracks one animation per tool in `self._tool_glow_anims`, stopping and
-  dropping the previous tool's before starting the new one; `refresh_structure()`
-  clears that dict outright since `tree.clear()` is about to destroy the
-  buttons those animations targeted anyway (Qt would stop/delete them
-  along with their parent button regardless — this just drops the
-  now-stale Python references).
+  click repeatedly while placing several markers). Each panel tracks its
+  own animation(s) and stops/drops the previous one before starting a
+  new one — `LayersPanel._tool_glow_anims` (one per tool; cleared
+  outright in `refresh_structure()`, since `tree.clear()` is about to
+  destroy the buttons those animations targeted anyway — Qt would stop/
+  delete them along with their parent button regardless, this just drops
+  the now-stale Python references) and `SwatchesPanel._eyedropper_glow_anim`
+  (just the one button).
 - **Handle-frame fade-in** (`app/canvas/handle_frame.py`,
   `HandleFrame.set_active()`): the corner/rotate handles fade in via a
   `QVariantAnimation` (0 → 1 opacity, `OutCubic`, ~140ms) when a new item

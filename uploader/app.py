@@ -18,6 +18,7 @@ import json
 import os
 import secrets
 import socket
+import threading
 import time
 import uuid
 from functools import wraps
@@ -25,6 +26,7 @@ from pathlib import Path
 
 from flask import (
     Flask,
+    abort,
     jsonify,
     redirect,
     render_template,
@@ -184,6 +186,39 @@ def forget_device():
     response = redirect(url_for("login"))
     response.delete_cookie(REMEMBER_COOKIE_NAME)
     return response
+
+
+def _delayed_exit() -> None:
+    # A brief delay so the HTTP response below actually reaches the
+    # caller before the process disappears. os._exit() (not
+    # sys.exit()/a raised SystemExit, which a request-handling thread
+    # can't cleanly unwind the whole server with anyway) skips Python
+    # cleanup entirely -- deliberately, since the classic
+    # `request.environ["werkzeug.server.shutdown"]` hook this used to
+    # rely on was removed from newer werkzeug versions, and a hard exit
+    # needs nothing from that API to work identically across versions.
+    time.sleep(0.3)
+    os._exit(0)
+
+
+@app.route("/internal/shutdown", methods=["POST"])
+def internal_shutdown():
+    """Lets a newly-launched instance of this same tool ask a stale one
+    still holding this port to get out of the way -- the self-service
+    recovery path behind PhoneUploadDialog's "port already in use"
+    handling (previously a dead end: close the dialog, hunt down the
+    leftover process by hand, try again).
+
+    Deliberately unauthenticated -- a new instance has no way to know an
+    old instance's PIN, that's the whole reason this route exists -- but
+    restricted to loopback callers only, so a phone on the LAN can never
+    reach it even by guessing the URL. The desktop app is always the
+    caller, and it's always running on this same machine.
+    """
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        abort(403)
+    threading.Thread(target=_delayed_exit, daemon=True).start()
+    return jsonify(ok=True)
 
 
 @app.route("/")

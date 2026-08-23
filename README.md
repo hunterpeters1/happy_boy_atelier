@@ -2,9 +2,8 @@
 
 A digital drafting table for traditional painters. Plan a physical
 painting before you touch the canvas: choose a format, arrange reference
-photos, and work out composition, perspective, and lighting. It's not a
-painting app and not an image generator — every mark on the canvas is
-placed by the artist.
+photos, and work out composition, perspective, and lighting until every
+decision feels settled — then take it to the easel.
 
 See `ARCHITECTURE.md` for the technical design.
 
@@ -127,10 +126,10 @@ Each imported photo is its own object:
   judging light/dark values without color. Same display-only behavior as
   Study Blur, and stacks with it. **Edit > Toggle Value Check (All
   References)** flips every visible image at once.
-- **Eyedropper** — a tool button in the Project Panel's Reference
-  section. Hover any reference image to read its color live in the
-  **Swatches** dock (hex, RGB, and a value/luminance percentage); click
-  to pin a color to a per-project palette.
+- **Eyedropper** — a tool button at the top of the **Swatches** dock,
+  right above where its own output shows up. Hover any reference image
+  to read its color live (hex, RGB, and a value/luminance percentage);
+  click to pin a color to a per-project palette.
 
 ### Composition tools
 
@@ -314,6 +313,15 @@ trusted home network, not a public one. Both devices also need to be on
 the same network segment — some WiFi mesh systems and phone privacy
 settings can put a phone on an isolated subnet that can't reach the
 laptop.
+
+**"Port 5000 is busy"?** This almost always means a previous uploader
+process is still running — the app was closed via Task Manager, crashed,
+or a manual `python app.py` run was left open in a terminal — not a real
+conflict with some other program. The dialog now detects this itself and
+tries to shut the leftover copy down and retry automatically before
+showing an error; if you still see the error message afterward, port
+5000 is genuinely held by something else, and closing that (or checking
+Task Manager for a leftover `python.exe`) is the fix.
 
 ## Status
 

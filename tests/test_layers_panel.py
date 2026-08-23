@@ -17,8 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QColor, QPixmap
 
+from app import constants as C
 from app.canvas.canvas_scene import CanvasScene
-from app.panels.layers_panel import LayersPanel, _ROW_ICON_PX, _RowButtons, _reference_thumbnail_icon
+from app.panels.layers_panel import LayersPanel, _RowButtons, _reference_thumbnail_icon
 from app.project import CanvasSpec
 
 
@@ -99,10 +100,10 @@ def test_reference_thumbnail_icon_is_square_regardless_of_source_aspect(qapp):
     from app.layers.reference_layer import ReferenceImageItem
     item = ReferenceImageItem("test-thumb", pixmap, 300, 150)
 
-    icon = _reference_thumbnail_icon(item, _ROW_ICON_PX)
-    pm = icon.pixmap(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
-    assert pm.width() == _ROW_ICON_PX
-    assert pm.height() == _ROW_ICON_PX
+    icon = _reference_thumbnail_icon(item, C.TOOL_ROW_ICON_PX)
+    pm = icon.pixmap(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
+    assert pm.width() == C.TOOL_ROW_ICON_PX
+    assert pm.height() == C.TOOL_ROW_ICON_PX
 
 
 def test_reference_thumbnail_icon_reflects_actual_pixel_content(qapp):
@@ -112,9 +113,9 @@ def test_reference_thumbnail_icon_reflects_actual_pixel_content(qapp):
     from app.layers.reference_layer import ReferenceImageItem
     item = ReferenceImageItem("test-thumb-2", pixmap, 60, 60)
 
-    icon = _reference_thumbnail_icon(item, _ROW_ICON_PX)
-    pm = icon.pixmap(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
-    center = pm.toImage().pixelColor(_ROW_ICON_PX // 2, _ROW_ICON_PX // 2)
+    icon = _reference_thumbnail_icon(item, C.TOOL_ROW_ICON_PX)
+    pm = icon.pixmap(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
+    center = pm.toImage().pixelColor(C.TOOL_ROW_ICON_PX // 2, C.TOOL_ROW_ICON_PX // 2)
     assert center.red() > center.green()
     assert center.red() > center.blue()
 
@@ -128,9 +129,9 @@ def test_reference_image_row_gets_a_thumbnail_not_the_generic_glyph(qapp):
     panel.refresh_structure()
 
     row = panel._row_for_obj[id(item)]
-    pm = row.icon(0).pixmap(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
-    assert pm.width() == _ROW_ICON_PX
-    center = pm.toImage().pixelColor(_ROW_ICON_PX // 2, _ROW_ICON_PX // 2)
+    pm = row.icon(0).pixmap(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
+    assert pm.width() == C.TOOL_ROW_ICON_PX
+    center = pm.toImage().pixelColor(C.TOOL_ROW_ICON_PX // 2, C.TOOL_ROW_ICON_PX // 2)
     assert center.blue() > center.red()  # reflects the blue source photo
 
 
@@ -146,3 +147,40 @@ def test_non_reference_item_row_keeps_its_glyph_icon(qapp):
 
     row = panel._row_for_obj[id(item)]
     assert not row.icon(0).isNull()
+
+
+def test_minimum_width_fits_every_layer_header_label(qapp):
+    """Regression test for a real bug: the panel's minimum width was
+    once a hardcoded guess sized for item rows, which left the layer
+    header rows' larger bold font clipped ("Composition"/"Perspective"
+    rendered with a trailing "..."). _compute_minimum_width() must
+    guarantee column 0 is wide enough for every header label, measured
+    against the actual running font/style rather than a fixed constant.
+    """
+    scene = _scene(qapp)
+    panel = LayersPanel(scene)
+    panel.resize(panel.minimumWidth(), 600)
+    panel.show()
+
+    tree = panel.tree
+    for kind, row in panel._layer_rows.items():
+        needed = tree.indentation() + tree.sizeHintForIndex(tree.indexFromItem(row, 0)).width()
+        assert tree.columnWidth(0) >= needed, f"{kind} header label would clip at the panel's minimum width"
+
+
+def test_minimum_width_grows_with_the_header_font(qapp):
+    """The floor must track the actual rendered font, not just a fixed
+    number measured once on one machine -- this is what makes it correct
+    across different DPI scaling, font substitution, and OS text-size
+    accessibility settings, none of which can be hardcoded for in advance.
+    """
+    scene = _scene(qapp)
+    panel = LayersPanel(scene)
+    baseline = panel.minimumWidth()
+
+    for row in panel._layer_rows.values():
+        font = row.font(0)
+        font.setPointSize(font.pointSize() + 10)
+        row.setFont(0, font)
+
+    assert panel._compute_minimum_width() > baseline

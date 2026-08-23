@@ -33,6 +33,14 @@ _TWO_CLICK_TOOLS = {"movement_line", "light_arrow", "shadow_arrow", "measure"}
 
 class CanvasScene(QGraphicsScene):
     tool_finished = Signal()
+    # Fires on every set_active_tool() call, carrying the new tool id (or
+    # None) -- the one signal every tool-activation-button-holding panel
+    # (LayersPanel, SwatchesPanel) listens to so each stays in sync
+    # regardless of *why* the active tool changed (its own button, a
+    # different panel's button, Escape, or auto-clearing after a one-shot
+    # placement), without MainWindow having to fan a call out to each
+    # panel by hand.
+    active_tool_changed = Signal(object)
     # Emitted whenever the app's own selection list (see selected_items()
     # below) changes — the one thing the Properties panel should listen to.
     selection_changed = Signal()
@@ -262,6 +270,7 @@ class CanvasScene(QGraphicsScene):
         for view in self.views():
             if hasattr(view, "set_tool_armed"):
                 view.set_tool_armed(tool is not None)
+        self.active_tool_changed.emit(tool)
 
     def _clear_preview_line(self) -> None:
         if self._preview_line is not None:

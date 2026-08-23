@@ -27,14 +27,13 @@ assigned as ascending list-index (see e.g. ReferenceLayerGroup._reassign_z).
 from __future__ import annotations
 
 from PySide6.QtCore import QPropertyAnimation, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QDoubleSpinBox,
     QFrame,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -42,6 +41,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QSlider,
     QSpinBox,
+    QStyle,
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -55,17 +55,7 @@ from .. import scrollbars
 from .. import settings
 from ..constants import LayerKind, PerspectiveMode
 from ..canvas.undo_commands import SetPerspectiveModeCommand, SetPropertyCommand
-
-# Slow, low-amplitude "breathing" glow on the currently-armed placement
-# tool -- see settings.futuristic_accents_enabled(). Kept as a small
-# glow (QGraphicsDropShadowEffect with no offset, not a real drop
-# shadow) rather than a fast/bright pulse: this sits next to a button
-# someone is about to click repeatedly while placing several markers, so
-# it needs to read as "this is live" without being distracting.
-_TOOL_GLOW_COLOR = C.COLOR_BRASS_BRIGHT
-_TOOL_GLOW_MIN_BLUR = 6.0
-_TOOL_GLOW_MAX_BLUR = 18.0
-_TOOL_GLOW_PERIOD_MS = 1800
+from .tool_glow import start_tool_glow
 from ..layers.reference_layer import ReferenceImageItem
 from ..layers.composition_layer import FocalPointItem, MeasurementItem, MovementLineItem, NoteItem
 from ..layers.lighting_layer import LightSourceItem, DirectionArrowItem
@@ -79,25 +69,9 @@ _ROLE_ITEM = Qt.UserRole
 # directly rather than re-deriving "which group owns this item" from the
 # scene a second time.
 _ROLE_GROUP = Qt.UserRole + 1
-# Compact row-button icon size — bumped alongside the toolbar/tree icon
-# bumps below for legibility; was 15/16, then 17, then 20px.
-#
-# NOT sized to literally match the Perspective section's "1-pt"/"2-pt"/
-# "3-pt" QRadioButtons' sizeHint height, even though that was the original
-# ask — measured on a real (non-offscreen) QApplication, a plain
-# QRadioButton("1-pt") is only 20px tall (indicator + Segoe UI text line
-# height), while a single compact QToolButton at this constant's *previous*
-# value (20px icon) was already 31px tall — i.e. matching the radio's
-# literal height would mean *shrinking* the buttons, the opposite of what
-# was asked. The actual "these still look swallowed" complaint is ink
-# density, not bounding-box size: icons.py's glyphs are 1.5-stroke-weight
-# line art scaled uniformly with this constant (the SVG viewBox and its
-# stroke-width scale together), so a thin stroke stays proportionally thin
-# no matter how many times the box size alone gets bumped. Sized up further
-# here for real visual weight and confirmed by eye against a real running
-# window (see the grab()-based verification note in the git history for
-# why offscreen rendering isn't trusted for this kind of judgment call).
-_ROW_ICON_PX = 26
+# Compact row-button icon size lives in constants.py now
+# (C.TOOL_ROW_ICON_PX) — shared with app/panels/swatches_panel.py's
+# eyedropper button, so the two can't quietly drift to different sizes.
 
 
 def _row_icon_and_label(item) -> tuple[str, str]:
@@ -147,7 +121,6 @@ def _reference_thumbnail_icon(item: ReferenceImageItem, size: int) -> QIcon:
     x = max(0, (square.width() - size) // 2)
     y = max(0, (square.height() - size) // 2)
     return QIcon(square.copy(x, y, size, size))
-    return "shapes", type(item).__name__
 
 
 class _RowButtons(QWidget):
@@ -204,8 +177,8 @@ class _RowButtons(QWidget):
         if can_move_forward is not None or can_move_backward is not None:
             self.up_btn = QToolButton()
             self.up_btn.setProperty("role", "compact")
-            self.up_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
-            self.up_btn.setIcon(icons.icon("reorder_up", _ROW_ICON_PX))
+            self.up_btn.setIconSize(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
+            self.up_btn.setIcon(icons.icon("reorder_up", C.TOOL_ROW_ICON_PX))
             self.up_btn.setAutoRaise(True)
             self.up_btn.setToolTip("Bring forward (prints closer to the top)")
             self.up_btn.setEnabled(bool(can_move_forward))
@@ -214,8 +187,8 @@ class _RowButtons(QWidget):
 
             self.down_btn = QToolButton()
             self.down_btn.setProperty("role", "compact")
-            self.down_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
-            self.down_btn.setIcon(icons.icon("reorder_down", _ROW_ICON_PX))
+            self.down_btn.setIconSize(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
+            self.down_btn.setIcon(icons.icon("reorder_down", C.TOOL_ROW_ICON_PX))
             self.down_btn.setAutoRaise(True)
             self.down_btn.setToolTip("Send backward (prints closer to the bottom)")
             self.down_btn.setEnabled(bool(can_move_backward))
@@ -225,8 +198,8 @@ class _RowButtons(QWidget):
             # Absolute reordering: send to back / bring to front
             self.to_back_btn = QToolButton()
             self.to_back_btn.setProperty("role", "compact")
-            self.to_back_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
-            self.to_back_btn.setIcon(icons.icon("reorder_down", _ROW_ICON_PX))
+            self.to_back_btn.setIconSize(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
+            self.to_back_btn.setIcon(icons.icon("reorder_down", C.TOOL_ROW_ICON_PX))
             self.to_back_btn.setAutoRaise(True)
             self.to_back_btn.setToolTip("Send to back (bottom of layer)")
             self.to_back_btn.clicked.connect(self.send_to_back_clicked)
@@ -234,8 +207,8 @@ class _RowButtons(QWidget):
 
             self.to_front_btn = QToolButton()
             self.to_front_btn.setProperty("role", "compact")
-            self.to_front_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
-            self.to_front_btn.setIcon(icons.icon("reorder_up", _ROW_ICON_PX))
+            self.to_front_btn.setIconSize(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
+            self.to_front_btn.setIcon(icons.icon("reorder_up", C.TOOL_ROW_ICON_PX))
             self.to_front_btn.setAutoRaise(True)
             self.to_front_btn.setToolTip("Bring to front (top of layer)")
             self.to_front_btn.clicked.connect(self.bring_to_front_clicked)
@@ -258,10 +231,10 @@ class _RowButtons(QWidget):
         if show_lock:
             self.lock_btn = QToolButton()
             self.lock_btn.setProperty("role", "compact")
-            self.lock_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
+            self.lock_btn.setIconSize(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
             self.lock_btn.setCheckable(True)
             self.lock_btn.setChecked(locked)
-            self.lock_btn.setIcon(icons.icon("lock" if locked else "unlock", _ROW_ICON_PX))
+            self.lock_btn.setIcon(icons.icon("lock" if locked else "unlock", C.TOOL_ROW_ICON_PX))
             self.lock_btn.setAutoRaise(True)
             self.lock_btn.setToolTip("Locked")
             self.lock_btn.toggled.connect(self._on_lock_toggled)
@@ -270,10 +243,10 @@ class _RowButtons(QWidget):
         if show_visibility:
             self.eye_btn = QToolButton()
             self.eye_btn.setProperty("role", "compact")
-            self.eye_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
+            self.eye_btn.setIconSize(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
             self.eye_btn.setCheckable(True)
             self.eye_btn.setChecked(visible)
-            self.eye_btn.setIcon(icons.icon("eye", _ROW_ICON_PX))
+            self.eye_btn.setIcon(icons.icon("eye", C.TOOL_ROW_ICON_PX))
             self.eye_btn.setAutoRaise(True)
             self.eye_btn.setToolTip("Visible")
             self.eye_btn.toggled.connect(self.visibility_toggled)
@@ -286,7 +259,7 @@ class _RowButtons(QWidget):
             self.visibility_toggled.connect(lambda _on: self._refresh_rest_opacity())
 
     def _on_lock_toggled(self, on: bool) -> None:
-        self.lock_btn.setIcon(icons.icon("lock" if on else "unlock", _ROW_ICON_PX))
+        self.lock_btn.setIcon(icons.icon("lock" if on else "unlock", C.TOOL_ROW_ICON_PX))
 
     def is_default_state(self) -> bool:
         if getattr(self, "lock_btn", None) is not None and self.lock_btn.isChecked():
@@ -348,8 +321,16 @@ class _ReorderableTree(QTreeWidget):
 
 
 class LayersPanel(QWidget):
-    tool_selected = Signal(str)
     request_import = Signal()
+
+    # Fixed width of column 1's button strip (see setColumnWidth() below).
+    # A named constant, not a literal re-typed in two places, because
+    # _compute_minimum_width() needs this exact number and querying it
+    # back via tree.columnWidth(1) is unreliable before the tree has ever
+    # been shown/laid out (observed returning a stale pre-layout value in
+    # that window, well past 169, for reasons that didn't trace to any
+    # single embedded widget's sizeHint being wider than expected).
+    _COLUMN1_WIDTH_PX = 169
 
     def __init__(self, scene, parent=None):
         super().__init__(parent)
@@ -369,16 +350,6 @@ class LayersPanel(QWidget):
         self._line_width_baseline: float | None = None
         self._line_width_last = 2.0
         self._perspective_opacity_baseline: float | None = None
-
-        # Mirrors PropertiesPanel.setMinimumWidth(300) — without a floor,
-        # this dock could be squeezed narrower than column 1's fixed 169px
-        # button strip (see setColumnWidth(1, ...) below) plus indentation/
-        # icon overhead leaves room for, and item names (reference
-        # filenames especially) got crushed down to a couple of characters.
-        # Sized for the widest realistic row (an item row: indent + icon +
-        # reorder up/down + eye + lock) with enough left over in column 0
-        # for a legible chunk of a name.
-        self.setMinimumWidth(328)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 6, 6, 6)
@@ -403,7 +374,7 @@ class LayersPanel(QWidget):
         self.tree.setHeaderHidden(True)
         self.tree.setColumnCount(2)
         self.tree.setIndentation(14)
-        self.tree.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
+        self.tree.setIconSize(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tree.setDragEnabled(True)
         self.tree.setAcceptDrops(True)
@@ -420,20 +391,51 @@ class LayersPanel(QWidget):
         self.tree.header().setSectionResizeMode(1, QHeaderView.Fixed)
         # Measured, not guessed: _RowButtons' own sizeHint().width() for
         # the worst case (an item row with reorder up/down + eye + lock, 4
-        # compact buttons at _ROW_ICON_PX plus its scrollbar-clearance
+        # compact buttons at C.TOOL_ROW_ICON_PX plus its scrollbar-clearance
         # right margin) is 169px at the sizes/margins above. A too-narrow
         # value here silently compresses those rows below Qt's Fusion-
         # style minimum content rect (the same class of bug as the once-
         # blank row buttons fixed earlier) rather than clipping visibly,
-        # so this must track _ROW_ICON_PX and _RowButtons' margins —
+        # so this must track C.TOOL_ROW_ICON_PX and _RowButtons' margins —
         # re-measure after changing either instead of hand-adjusting this
         # number.
-        self.tree.setColumnWidth(1, 169)
+        self.tree.setColumnWidth(1, self._COLUMN1_WIDTH_PX)
         self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
         outer.addWidget(self.tree, 1)
         install_row_hover(self.tree)
 
+        # Keeps this panel's own tool buttons in sync with the active tool
+        # no matter what changed it -- a click on one of these buttons
+        # (_activate_tool()), SwatchesPanel's eyedropper button, Escape,
+        # or auto-clearing after a one-shot placement all funnel through
+        # CanvasScene.set_active_tool(), the single choke point that
+        # signal fires from. Wired here (not by MainWindow after
+        # construction) so this panel is self-consistent on its own, the
+        # same self-wiring SwatchesPanel already does for its own scene
+        # signals.
+        scene.active_tool_changed.connect(self._sync_tool_buttons)
+
         self.refresh_structure()
+
+        # A floor under the dock's width, mirroring
+        # PropertiesPanel.setMinimumWidth(300) — without one, this dock
+        # could be squeezed narrower than column 1's fixed 169px button
+        # strip plus indentation/icon overhead leaves room for, crushing
+        # item names (reference filenames especially) to a couple of
+        # characters. This used to be a single hardcoded number, sized by
+        # hand-measuring on one dev machine — which broke for real users:
+        # the layer header rows (_build_layer()) use a larger 13pt bold
+        # font than item rows, so whether "Reference"/"Composition"/
+        # "Perspective" fit depends on this machine's actual Segoe UI
+        # metrics, its DPI scaling, and any Windows "make text bigger"
+        # accessibility setting — none of which this dev environment's
+        # font matches, and none of which a fixed pixel constant can track.
+        # So instead this is measured live, every launch, against the
+        # actual running font/style: sizeHintForIndex() per header row
+        # (not sizeHintForColumn(0), which would also pick up arbitrarily
+        # long item names/notes — those are *meant* to elide, per this
+        # panel's existing convention, and must not inflate the floor).
+        self.setMinimumWidth(self._compute_minimum_width())
 
     # -- structural rebuild -------------------------------------------------
     def refresh_structure(self) -> None:
@@ -487,6 +489,42 @@ class LayersPanel(QWidget):
         self._sync_selection_highlight()
         self._apply_search_filter()
 
+    def _compute_minimum_width(self) -> int:
+        """How wide this dock must be, at minimum, for the five layer
+        header labels to render without clipping — see the call site's
+        comment in __init__ for why this is measured instead of a fixed
+        constant. Requires refresh_structure() to have already run at
+        least once, so self._layer_rows is populated.
+        """
+        # sizeHintForIndex() covers only the delegate's own content (icon
+        # + text) -- it does NOT include the row's indentation/branch-
+        # arrow space, which the view adds separately at paint time. Found
+        # by rendering at the size this method computed without it: the
+        # sizeHint said column 0 had enough room, but "Composition" still
+        # visibly rendered elided. tree.indentation() is what was missing.
+        widest_header = self.tree.indentation() + max(
+            self.tree.sizeHintForIndex(self.tree.indexFromItem(row, 0)).width()
+            for row in self._layer_rows.values()
+        )
+        margins = self.layout().contentsMargins()
+        frame = self.tree.frameWidth() * 2
+        scrollbar = self.tree.style().pixelMetric(QStyle.PM_ScrollBarExtent)
+        # +8 safety margin: the pieces above cover every measurable
+        # contributor to column 0's real width, but leave a little room
+        # for style-level rounding this doesn't explicitly account for.
+        # Deliberately _COLUMN1_WIDTH_PX, not tree.columnWidth(1) — see
+        # that constant's docstring for why reading it back here is
+        # unreliable.
+        return (
+            margins.left()
+            + margins.right()
+            + widest_header
+            + self._COLUMN1_WIDTH_PX
+            + frame
+            + scrollbar
+            + 8
+        )
+
     @staticmethod
     def _set_row_widget(row: QTreeWidgetItem, column: int, widget: QWidget) -> None:
         """setItemWidget() alone does not grow the row to fit an embedded
@@ -499,7 +537,7 @@ class LayersPanel(QWidget):
 
     def _build_layer(self, kind: LayerKind, icon_name: str, group, populate_fn, *, show_lock: bool = True) -> None:
         row = QTreeWidgetItem(self.tree)
-        row.setIcon(0, icons.icon(icon_name, _ROW_ICON_PX))
+        row.setIcon(0, icons.icon(icon_name, C.TOOL_ROW_ICON_PX))
         row.setText(0, C.LAYER_LABELS[kind])
         # An explicit absolute size, not "current size + 2" — QTreeWidgetItem
         # .font(0) returns a Qt-default-constructed QFont (whatever the
@@ -576,9 +614,9 @@ class LayersPanel(QWidget):
         icon_name, label = _row_icon_and_label(obj)
         row = QTreeWidgetItem(parent)
         if isinstance(obj, ReferenceImageItem):
-            row.setIcon(0, _reference_thumbnail_icon(obj, _ROW_ICON_PX))
+            row.setIcon(0, _reference_thumbnail_icon(obj, C.TOOL_ROW_ICON_PX))
         else:
-            row.setIcon(0, icons.icon(icon_name, _ROW_ICON_PX))
+            row.setIcon(0, icons.icon(icon_name, C.TOOL_ROW_ICON_PX))
         row.setText(0, label)
         # A narrow dock elides long filenames/note text with "…" and gives
         # no other way to read the full name — the tooltip is that way.
@@ -718,8 +756,8 @@ class LayersPanel(QWidget):
         layout.setContentsMargins(0, 2, 0, 2)
         add_btn = QToolButton()
         add_btn.setProperty("role", "compact")
-        add_btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
-        add_btn.setIcon(icons.icon("import", _ROW_ICON_PX))
+        add_btn.setIconSize(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
+        add_btn.setIcon(icons.icon("import", C.TOOL_ROW_ICON_PX))
         add_btn.setAutoRaise(True)
         # Icon + tooltip only, no adjacent label — matches the Composition/
         # Lighting/Perspective "Add" rows below it rather than being the
@@ -733,9 +771,12 @@ class LayersPanel(QWidget):
         self._set_row_widget(row, 0, widget)
         self._span_full_width(row)
 
-        self._add_tool_row(parent, [
-            ("eyedropper", "eyedropper", "Sample a color from a reference image"),
-        ])
+        # The eyedropper tool button lives in the Swatches panel instead of
+        # here -- see SwatchesPanel's own docstring: it arms the same
+        # scene.set_active_tool("eyedropper") this row's other buttons use,
+        # but its *output* (the live readout, pinned swatches) only ever
+        # shows up in Swatches, so the trigger and destination are now in
+        # the same place rather than split across two docks.
 
         # Reversed: the layer group's own list is back-to-front (index 0 =
         # bottom of the stack), but the row order here should read
@@ -968,8 +1009,8 @@ class LayersPanel(QWidget):
     def _make_tool_button(self, tool: str, icon_name: str, tooltip: str) -> QToolButton:
         btn = QToolButton()
         btn.setProperty("role", "compact")
-        btn.setIconSize(QSize(_ROW_ICON_PX, _ROW_ICON_PX))
-        btn.setIcon(icons.icon(icon_name, _ROW_ICON_PX))
+        btn.setIconSize(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
+        btn.setIcon(icons.icon(icon_name, C.TOOL_ROW_ICON_PX))
         btn.setCheckable(True)
         btn.setAutoRaise(True)
         btn.setToolTip(tooltip)
@@ -981,8 +1022,14 @@ class LayersPanel(QWidget):
         current = self.scene.active_tool()
         new_tool = None if current == tool else tool
         self.scene.set_active_tool(new_tool)
-        self.tool_selected.emit(new_tool or "")
-        self._sync_tool_buttons(new_tool)
+        # No direct _sync_tool_buttons() call here -- set_active_tool()
+        # above already emits active_tool_changed, which __init__ wired
+        # straight to it. That's also what keeps this panel's buttons in
+        # sync when the *active* tool changes for a reason that has
+        # nothing to do with this panel at all -- SwatchesPanel's own
+        # eyedropper button, Escape, or auto-clearing after a one-shot
+        # placement (MainWindow._on_tool_finished()) -- one signal, every
+        # tool-button-holding panel listens for itself.
 
     def _sync_tool_buttons(self, active_tool: str | None) -> None:
         accents_on = settings.futuristic_accents_enabled()
@@ -995,35 +1042,7 @@ class LayersPanel(QWidget):
             if old_anim is not None:
                 old_anim.stop()
             if tool == active_tool and accents_on:
-                self._tool_glow_anims[tool] = self._start_tool_glow(btn)
+                self._tool_glow_anims[tool] = start_tool_glow(btn)
             else:
                 btn.setGraphicsEffect(None)
-
-    @staticmethod
-    def _start_tool_glow(btn: QToolButton) -> QPropertyAnimation:
-        # Constructed with btn as its parent, not QGraphicsDropShadowEffect()
-        # followed by setGraphicsEffect(effect) -- confirmed at runtime
-        # that despite setGraphicsEffect() documenting a Qt-level
-        # ownership transfer, PySide6 doesn't recognize that as a reason
-        # to keep the Python wrapper alive: without an explicit parent
-        # here, the effect was garbage-collected (and silently cleared
-        # off the button) the moment this function returned.
-        effect = QGraphicsDropShadowEffect(btn)
-        effect.setColor(QColor(_TOOL_GLOW_COLOR))
-        effect.setOffset(0, 0)
-        effect.setBlurRadius(_TOOL_GLOW_MIN_BLUR)
-        btn.setGraphicsEffect(effect)
-
-        # A single looped animation with a middle keyframe (rather than
-        # two animations played back to back, or setLoopCount() with
-        # Alternate direction) gives one smooth breathe-in/breathe-out
-        # cycle per loop with the least moving parts.
-        anim = QPropertyAnimation(effect, b"blurRadius", btn)
-        anim.setDuration(_TOOL_GLOW_PERIOD_MS)
-        anim.setKeyValueAt(0.0, _TOOL_GLOW_MIN_BLUR)
-        anim.setKeyValueAt(0.5, _TOOL_GLOW_MAX_BLUR)
-        anim.setKeyValueAt(1.0, _TOOL_GLOW_MIN_BLUR)
-        anim.setLoopCount(-1)
-        anim.start()
-        return anim
 

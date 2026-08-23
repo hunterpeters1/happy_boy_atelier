@@ -49,13 +49,15 @@ class AboutDialog(QDialog):
         self.name_label.setAlignment(Qt.AlignHCenter)
         layout.addWidget(self.name_label)
 
-        # Mission line pulled verbatim from README.md/CLAUDE.md -- this
-        # app is not a paint program and not an AI image generator; every
-        # mark is placed by the artist.
+        # Positive framing only -- what the app is and the intent behind
+        # it, not a list of what it isn't (that's implicit; a painter
+        # opening this doesn't need it spelled out as a disclaimer).
         mission_label = QLabel(
-            "Plan the painting before you touch the canvas.\n"
-            "A digital drafting table for traditional painters — never a\n"
-            "paint program, never an AI image generator."
+            "Plan the painting before you touch the canvas. A digital "
+            "drafting table for traditional painters — arrange reference "
+            "photos, then work out composition, perspective, and lighting "
+            "until every decision feels settled, before a single mark "
+            "goes on the physical canvas."
         )
         mission_label.setAlignment(Qt.AlignHCenter)
         mission_label.setWordWrap(True)

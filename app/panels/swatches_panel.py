@@ -1,13 +1,23 @@
-"""Swatches dock: the eyedropper tool's output. Hovering a reference image
-with the eyedropper armed updates a live color/value readout continuously;
-clicking pins that color into a per-project list to reference while mixing
-paint at the easel. Per-project, not shared between projects -- see
-meta.color_swatches (project.py) and MainWindow's dock rebuild on project
-load/new.
+"""Swatches dock: the eyedropper's own activation button, and its output.
+Hovering a reference image with the eyedropper armed updates a live
+color/value readout continuously; clicking pins that color into a
+per-project list to reference while mixing paint at the easel.
+Per-project, not shared between projects -- see meta.color_swatches
+(project.py) and MainWindow's dock rebuild on project load/new.
+
+The eyedropper's toolbar button lives here, not in the Project Panel
+(where every *other* tool-activation button lives) -- deliberately: this
+is the one placement tool whose entire point is the output shown right
+below it, so keeping trigger and destination in the same dock beats
+matching every other tool's location for its own sake. It arms the same
+scene.set_active_tool("eyedropper") those other buttons use, and stays
+in sync with the rest of the app the same way they do -- see
+CanvasScene.active_tool_changed.
 """
 
 from __future__ import annotations
 
+from PySide6.QtCore import QPropertyAnimation, QSize
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
@@ -19,7 +29,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import constants as C
 from .. import icons
+from .. import settings
+from .tool_glow import start_tool_glow
 
 _CHIP_ICON_PX = 14
 
@@ -59,10 +72,24 @@ class SwatchesPanel(QWidget):
         # can drop the right entry from both by shared index -- value-based
         # removal would misfire on duplicate colors.
         self._swatch_rows: list[QWidget] = []
+        self._eyedropper_glow_anim: QPropertyAnimation | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(8)
+
+        tool_row = QHBoxLayout()
+        self._eyedropper_btn = QToolButton()
+        self._eyedropper_btn.setProperty("role", "compact")
+        self._eyedropper_btn.setIconSize(QSize(C.TOOL_ROW_ICON_PX, C.TOOL_ROW_ICON_PX))
+        self._eyedropper_btn.setIcon(icons.icon("eyedropper", C.TOOL_ROW_ICON_PX))
+        self._eyedropper_btn.setCheckable(True)
+        self._eyedropper_btn.setAutoRaise(True)
+        self._eyedropper_btn.setToolTip("Sample a color from a reference image")
+        self._eyedropper_btn.clicked.connect(self._toggle_eyedropper)
+        tool_row.addWidget(self._eyedropper_btn)
+        tool_row.addStretch(1)
+        outer.addLayout(tool_row)
 
         live_row = QHBoxLayout()
         self._live_chip = _SwatchChip(28)
@@ -96,6 +123,27 @@ class SwatchesPanel(QWidget):
 
         scene.color_hovered.connect(self.update_live_color)
         scene.color_sampled.connect(self.add_swatch)
+        scene.active_tool_changed.connect(self._sync_eyedropper_button)
+
+    # -- eyedropper activation -----------------------------------------------
+    def _toggle_eyedropper(self) -> None:
+        current = self.scene.active_tool()
+        new_tool = None if current == "eyedropper" else "eyedropper"
+        self.scene.set_active_tool(new_tool)
+
+    def _sync_eyedropper_button(self, active_tool) -> None:
+        is_active = active_tool == "eyedropper"
+        self._eyedropper_btn.blockSignals(True)
+        self._eyedropper_btn.setChecked(is_active)
+        self._eyedropper_btn.blockSignals(False)
+
+        if self._eyedropper_glow_anim is not None:
+            self._eyedropper_glow_anim.stop()
+            self._eyedropper_glow_anim = None
+        if is_active and settings.futuristic_accents_enabled():
+            self._eyedropper_glow_anim = start_tool_glow(self._eyedropper_btn)
+        else:
+            self._eyedropper_btn.setGraphicsEffect(None)
 
     # -- live readout ------------------------------------------------------
     def update_live_color(self, color: QColor | None) -> None:

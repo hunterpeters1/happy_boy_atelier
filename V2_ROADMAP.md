@@ -2,12 +2,12 @@
 
 **From:** Senior Engineer
 **To:** Hunter (Art Director), ChatGPT (Producer/Product Designer)
-**Status:** Phase 0 and most of Phase 1 below are now shipped (unreleased,
-see `CHANGELOG.md`) — this document's original assessment and phase plan
-are kept below as the historical record they were written as, with a
-status note against every item. **Section 7, added after the fact, is
-the current forward-looking roadmap** — read that first if you just want
-"what's next."
+**Status:** Phases 0 through 4 below have now all shipped in some form
+(unreleased, see `CHANGELOG.md`) — this document's original assessment and
+phase plan are kept below as the historical record they were written as,
+with a status note against every item. **Section 7, added after the fact
+and kept up to date since, is the current forward-looking roadmap** — read
+that first if you just want "what's next."
 
 This was the first deliverable requested before any V2 code got written: an
 honest read on what v1.0 actually was under the hood, what that meant for
@@ -71,11 +71,18 @@ originally written.)*
   across four files hand-roll the same `mousePressEvent` override +
   selection call. → unified into `InteractiveItem`
   (`app/canvas/interactive_item.py`).
-- ⬜ **Still open.** No performance validation with real reference photo
-  sizes. Full-resolution `QPixmap`s are held in memory per reference
-  image with no proxy/thumbnail strategy for on-screen display. Fine for
-  a handful of moderate images; untested for what an artist actually
-  imports (a dozen 12+ MP phone photos). Carried into Section 7.
+- 🟡 **Mitigated, not measured.** No performance validation with real
+  reference photo sizes ever happened — full-resolution `QPixmap`s are
+  still held in memory per reference image with no proxy/thumbnail
+  strategy for the *stored* copy (only the on-screen display proxy is
+  downscaled). Rather than measure it, the decision was to bound the
+  worst case instead: reference images are now hard-capped at 15 per
+  project (`MAX_REFERENCE_IMAGES`, `app/constants.py`) — this app plans
+  a painting with a handful of references, not a bulk photo library, so
+  an unbounded count was never actually needed. The per-image memory
+  cost itself is still exactly as unvalidated as it always was; what's
+  changed is that the total exposure now has a firm ceiling instead of
+  being open-ended. See Section 7.
 - ✅ **Shipped, further than proposed.** ~~The Layers panel does two
   jobs.~~ Simultaneously a layer visibility/lock tree and a tool palette,
   reading like a debug panel. → rebuilt as the Project Panel: a real
@@ -192,23 +199,31 @@ infrastructure to do move/edit actions correctly.*
   direct in-place edge-handle manipulation, no Crop…/Apply/Cancel
   buttons or crop mode to enter/exit.
 
-### Phase 2 — Precision Tools for Traditional Painters — 🟨 partial
+### Phase 2 — Precision Tools for Traditional Painters — ✅ done
 *Directly serves the "prepare before you paint" mission; each is additive,
 doesn't touch existing layers.*
 
-- ⬜ On-canvas ruler / angle measurement tool — not started, carried into
-  Section 7
-- 🟨 Snapping — angle snap on rotate (Shift, 15°) ✅ and reference-image
-  center-to-center/center-to-canvas-center snapping shipped, but *not*
-  the rule-of-thirds/golden-ratio-intersection snapping this line
-  originally proposed, nor true edge-to-edge (vs. center) snapping —
-  both carried into Section 7
-- ⬜ Non-destructive grayscale/value-check toggle for the reference layer
-  — not started, carried into Section 7
-- ⬜ Optional: user-defined custom grid spacing beyond thirds/golden ratio
-  — not started (the *perspective* grid already had custom spacing
-  before this doc was written; this item is specifically about the
-  Guides layer's two fixed overlays)
+- ✅ On-canvas ruler / angle measurement tool — `MeasurementItem`
+  (`app/layers/composition_layer.py`), placed via the existing two-click
+  tool pattern; reports length and angle from horizontal in one placed
+  segment.
+- ✅ Snapping — angle snap on rotate (Shift, 15°), reference-image
+  center-to-center/center-to-canvas-center snapping, rule-of-thirds/
+  golden-ratio-intersection snapping, and true edge-to-edge (not just
+  center-to-center) snapping have all shipped
+  (`ReferenceImageItem._snap_position()`).
+- ✅ Non-destructive grayscale/value-check toggle for the reference layer
+  — per-image `grayscale_amount()` field (same shape as Blur/Line
+  Clarity) plus a `toggle_grayscale_all()` macro for the whole reference
+  set at once.
+- ✅ Closed, superseded. Optional user-defined custom grid spacing
+  beyond thirds/golden ratio was never built — a fixed 1-inch grid
+  overlay shipped instead (`InchGridOverlay`, `app/layers/guide_overlay.py`,
+  sized off `C.SCENE_PX_PER_INCH` so its lines land exactly on the
+  ruler's own inch ticks — for the classic grid-method drawing
+  technique). Hunter's call: that single fixed spacing already covers
+  the real use case well enough that arbitrary custom spacing isn't
+  worth building.
 
 ### Phase 3 — Projector Mode Pro — ⬜ cut, moot
 *Most technically involved phase — real geometric complexity (quad-warp
@@ -245,10 +260,14 @@ UI upgrade plan's own Section D.
    Phase 0 adds more direct-mutation call sites if we don't fix this
    first. This is the main argument for Phase 0 being first, not a
    "someday" item.
-2. **Reference image memory footprint is unvalidated.** No proxy/preview
-   resolution strategy exists yet. Worth a deliberate look once
-   real-world photo sets get tested — I'd rather flag this now than have
-   it surface as "the app got slow" after Phase 2 ships.
+2. **Reference image memory footprint is unvalidated — now bounded
+   instead.** No proxy/preview resolution strategy exists for the
+   *stored* full-resolution copy. Rather than measure real-world photo
+   sets, the project count itself is now hard-capped at 15 per project
+   (see Section 1's matching note) — a deliberate "bound the worst case"
+   choice instead of "characterize the actual cost." Worth revisiting if
+   a future feature needs more than 15 references per project, since the
+   underlying per-image cost still hasn't actually been measured.
 3. **Packaging fragility is a real cost, not a one-time annoyance.**
    Every future release repeats the icon/`--add-data`/`--collect-all`
    debugging unless the build script is fixed once and reused. — ✅
@@ -276,10 +295,13 @@ UI upgrade plan's own Section D.
    roadmap — want to confirm it's earning that cost before scoping it in.
    Moot as of the projector mode removal — nothing to correct keystone
    *of* anymore.
-2. **Installer vs. portable exe:** given the packaging friction this
-   round, is it worth investing in a proper installer (handles the icon/
-   shortcut/Defender friction as a side effect), or does portable-exe-on-
-   desktop stay the model?
+2. **Installer vs. portable exe:** ✅ **answered in direction.** For a
+   real product, Hunter wants an installer, not a portable exe. The
+   condition attached: the deciding factor is how annoying it is to get
+   a new build in front of users after a fresh idea, not the initial
+   install experience — so this isn't fully scoped until that update
+   workflow (checking for/delivering a new version, not just the first
+   install) is actually designed. See Section 7's "concrete next phase."
 3. **Grayscale value-check and color eyedropper — philosophy check:**
    both are informational (they help the artist see/measure) rather than
    generative. My read is they're consistent with "artist decides,
@@ -314,18 +336,33 @@ selection model, replacing Qt's, since `QGraphicsItem.setSelected()`
 never stuck for children of these `QGraphicsItemGroup` layers).
 
 ### Carried forward from Sections 4–6, still genuinely open
-- On-canvas ruler/angle measurement tool (Phase 2)
-- Non-destructive grayscale/value-check toggle (Phase 2)
-- Rule-of-thirds/golden-ratio-intersection snapping, and true edge-to-
-  edge (not just center-to-center) reference-image snapping
 - Reference-image memory footprint / proxy-resolution strategy (Section
-  1, Section 5 item 2) — still genuinely unvalidated
+  1, Section 5 item 2) — **bounded, not resolved.** A hard 15-image
+  per-project cap now exists (`MAX_REFERENCE_IMAGES`), so the worst case
+  is no longer unbounded, but the underlying question — what a realistic
+  reference set (a dozen-plus 12+ MP phone/DSLR photos) actually costs
+  in memory — was never measured and still hasn't been. The display-proxy
+  cache (`_get_display_pixmap()`) fixed the *speed* problem this caused;
+  the *memory* question for the stored full-resolution copy remains open
+  in principle, just capped in practice. Worth an actual measurement pass
+  if 15 ever turns out to be too tight a ceiling.
 - Multiple open projects/tabs (Phase 4) — still gated on Section 6 item
   5; templates and the color eyedropper have since shipped (see Section
   7's Phase 4 status above)
-- Installer vs. portable exe (Section 6 item 2) — still open, and more
-  pointed now that the build path is a manual command sequence by firm
-  policy rather than a placeholder
+- Installer vs. portable exe (Section 6 item 2) — **answered in
+  direction, not yet in detail:** for a real product, Hunter's call is
+  an installer, not a portable exe. The condition attached is update
+  friction — how annoying it is to ship a new build after a fresh idea
+  — so this isn't fully scoped until that update workflow is actually
+  designed (see Section 6 item 2's updated note).
+
+Custom grid spacing (Phase 2) and the bundled critique-pack export are
+both now closed — see Phase 2's status above and the "removed" note
+under Batch export presets below, respectively.
+
+All other Phase 2 items (measurement tool, grayscale/value-check toggle,
+rule-of-thirds/golden-ratio-intersection snapping, true edge-to-edge
+snapping) have since shipped — see Phase 2's status above.
 
 ### New, discovered while implementing the phases above
 Each of these was a deliberate, explicitly-flagged scope cut in its
@@ -351,23 +388,52 @@ phase's own commit — not an oversight — kept here so they aren't lost:
   a folder the artist already trusts.
 - **Batch export presets** — ✅ done (`app/dialogs/export_dialog.py`'s
   Preset combo: save a named format/DPI/Study-Blur configuration, reuse
-  it across paintings). A **bundled "critique pack" export** (canvas
-  render + planning notes, zipped for sending to a mentor without handing
-  over the live editable project) is still open — a preset can get you
-  most of the way there today, but there's no separate zip-bundle export
-  format.
+  it across paintings). A bundled "critique pack" export (canvas render
+  + planning notes, zipped for a mentor without handing over the live
+  project) was proposed here too, but Hunter no longer wants it —
+  dropped, not just deferred.
+- **Reference-image cap (15 per project)** — ✅ done
+  (`MAX_REFERENCE_IMAGES`, `app/constants.py`), enforced at
+  `MainWindow._import_image_paths()`, the one entry point the Import
+  dialog, OS drag-and-drop, and the Library panel's drag-in all already
+  shared. Grew directly out of the memory-footprint risk above — see
+  Section 1/5's updated notes — plus a plain judgment call that this app
+  was never meant to manage a bulk photo library. All-or-nothing: an
+  import that would exceed the cap is refused entirely, not silently
+  truncated. A pre-existing project that already exceeds 15 (predating
+  the cap, or hand-edited) still opens and loads every image untouched —
+  the cap only ever blocks new imports.
+- **Phone uploader hardening and polish** — ✅ done, three related
+  pieces, all in `uploader/`: (1) instant per-photo preview tiles while
+  uploading, using `createImageBitmap`'s resize option so the browser
+  never decodes a full 12-48MP phone photo just to paint a ~100px tile;
+  (2) the same 15-item cap philosophy applied to a single upload batch,
+  refused outright rather than truncated; (3) real visual identity for
+  both the login and gallery pages — an "instrument panel" card, the
+  same corner-rivet hardware motif the desktop app uses on its canvas
+  and dock title bars, and the actual "HB" app icon rendered large as a
+  proper logo instead of only ever appearing tiny as a favicon.
 
 ### A concrete next phase, if picking one
-Given what's already landed, the highest-leverage next slice is probably
-**"Phase 2, finished"**: the on-canvas measurement tool and the
-grayscale/value-check toggle are the two items this document's own
-Section 2 called out as scoring unusually well against the "does this
-help an artist create better or faster" test and *not yet started* —
-both are additive (don't touch existing layers), both fit the existing
-`InteractiveItem`/undo-stack/Project-Panel infrastructure directly, and
-neither is gated on an unanswered open question the way Phases 3–4 are.
-Section 6 items 1, 4, and 5 are still worth getting explicit answers on
-before scoping Phases 3–4, same as originally proposed.
+Phase 2 is done, the memory-footprint risk is bounded (not fully closed
+— see Section 5 item 2), custom grid spacing is superseded by the
+1-inch grid, and the critique-pack export is dropped outright — none of
+those are pending work anymore. What's left both genuinely open and
+worth doing:
+
+- **Design the actual update workflow**, now that Hunter's answered the
+  installer question in direction ("for a product, an installer"): what
+  does going from "I have a new idea" to "a user is running the new
+  build" actually look like? An installer alone (e.g. Inno Setup)
+  handles the icon/shortcut/Defender friction from a fresh install, but
+  doesn't by itself give you *update* delivery (checking for a new
+  version, prompting, re-running the installer) — that's a separate
+  piece of design/scope, and it's the exact friction Hunter flagged as
+  the deciding factor. Worth scoping concretely before committing
+  engineering time to either half.
+- **Multiple open projects/tabs** (Section 6 item 5) — still
+  unanswered, still gated on explicit sign-off given the complexity/
+  mental-model cost already flagged.
 
 ---
 
