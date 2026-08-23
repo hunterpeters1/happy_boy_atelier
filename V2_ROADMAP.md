@@ -199,7 +199,7 @@ infrastructure to do move/edit actions correctly.*
   direct in-place edge-handle manipulation, no Crop…/Apply/Cancel
   buttons or crop mode to enter/exit.
 
-### Phase 2 — Precision Tools for Traditional Painters — ✅ done, one item still open
+### Phase 2 — Precision Tools for Traditional Painters — ✅ done
 *Directly serves the "prepare before you paint" mission; each is additive,
 doesn't touch existing layers.*
 
@@ -216,10 +216,14 @@ doesn't touch existing layers.*
   — per-image `grayscale_amount()` field (same shape as Blur/Line
   Clarity) plus a `toggle_grayscale_all()` macro for the whole reference
   set at once.
-- ⬜ Optional: user-defined custom grid spacing beyond thirds/golden ratio
-  — still not started (the *perspective* grid already had custom spacing
-  before this doc was written; this item is specifically about the
-  Guides layer's two fixed overlays)
+- ✅ Closed, superseded. Optional user-defined custom grid spacing
+  beyond thirds/golden ratio was never built — a fixed 1-inch grid
+  overlay shipped instead (`InchGridOverlay`, `app/layers/guide_overlay.py`,
+  sized off `C.SCENE_PX_PER_INCH` so its lines land exactly on the
+  ruler's own inch ticks — for the classic grid-method drawing
+  technique). Hunter's call: that single fixed spacing already covers
+  the real use case well enough that arbitrary custom spacing isn't
+  worth building.
 
 ### Phase 3 — Projector Mode Pro — ⬜ cut, moot
 *Most technically involved phase — real geometric complexity (quad-warp
@@ -291,10 +295,13 @@ UI upgrade plan's own Section D.
    roadmap — want to confirm it's earning that cost before scoping it in.
    Moot as of the projector mode removal — nothing to correct keystone
    *of* anymore.
-2. **Installer vs. portable exe:** given the packaging friction this
-   round, is it worth investing in a proper installer (handles the icon/
-   shortcut/Defender friction as a side effect), or does portable-exe-on-
-   desktop stay the model?
+2. **Installer vs. portable exe:** ✅ **answered in direction.** For a
+   real product, Hunter wants an installer, not a portable exe. The
+   condition attached: the deciding factor is how annoying it is to get
+   a new build in front of users after a fresh idea, not the initial
+   install experience — so this isn't fully scoped until that update
+   workflow (checking for/delivering a new version, not just the first
+   install) is actually designed. See Section 7's "concrete next phase."
 3. **Grayscale value-check and color eyedropper — philosophy check:**
    both are informational (they help the artist see/measure) rather than
    generative. My read is they're consistent with "artist decides,
@@ -342,15 +349,16 @@ never stuck for children of these `QGraphicsItemGroup` layers).
 - Multiple open projects/tabs (Phase 4) — still gated on Section 6 item
   5; templates and the color eyedropper have since shipped (see Section
   7's Phase 4 status above)
-- Installer vs. portable exe (Section 6 item 2) — still open, and more
-  pointed now that the build path is a manual command sequence by firm
-  policy rather than a placeholder
-- User-defined custom grid spacing beyond thirds/golden ratio (Phase 2's
-  one remaining item) — not started
-- Bundled "critique pack" export (canvas render + planning notes, zipped
-  for a mentor, without handing over the live editable project) — see
-  the note under Batch export presets below; a preset gets partway there
-  today but there's no separate zip-bundle export format
+- Installer vs. portable exe (Section 6 item 2) — **answered in
+  direction, not yet in detail:** for a real product, Hunter's call is
+  an installer, not a portable exe. The condition attached is update
+  friction — how annoying it is to ship a new build after a fresh idea
+  — so this isn't fully scoped until that update workflow is actually
+  designed (see Section 6 item 2's updated note).
+
+Custom grid spacing (Phase 2) and the bundled critique-pack export are
+both now closed — see Phase 2's status above and the "removed" note
+under Batch export presets below, respectively.
 
 All other Phase 2 items (measurement tool, grayscale/value-check toggle,
 rule-of-thirds/golden-ratio-intersection snapping, true edge-to-edge
@@ -380,11 +388,10 @@ phase's own commit — not an oversight — kept here so they aren't lost:
   a folder the artist already trusts.
 - **Batch export presets** — ✅ done (`app/dialogs/export_dialog.py`'s
   Preset combo: save a named format/DPI/Study-Blur configuration, reuse
-  it across paintings). A **bundled "critique pack" export** (canvas
-  render + planning notes, zipped for sending to a mentor without handing
-  over the live editable project) is still open — a preset can get you
-  most of the way there today, but there's no separate zip-bundle export
-  format.
+  it across paintings). A bundled "critique pack" export (canvas render
+  + planning notes, zipped for a mentor without handing over the live
+  project) was proposed here too, but Hunter no longer wants it —
+  dropped, not just deferred.
 - **Reference-image cap (15 per project)** — ✅ done
   (`MAX_REFERENCE_IMAGES`, `app/constants.py`), enforced at
   `MainWindow._import_image_paths()`, the one entry point the Import
@@ -408,16 +415,25 @@ phase's own commit — not an oversight — kept here so they aren't lost:
   proper logo instead of only ever appearing tiny as a favicon.
 
 ### A concrete next phase, if picking one
-Phase 2 (the section this used to point to) is now done, and the
-memory-footprint risk that used to top this list is bounded by the new
-15-image cap rather than measured — good enough for now, not fully
-closed out (see Section 5 item 2's updated note). Of what's left, the
-bundled critique-pack export is the best next content feature: small,
-additive, and not gated on any open design question the way the
-remaining items are. The installer-vs-portable-exe and multi-project-
-tabs questions (Section 6 items 2 and 5) still need an explicit answer
-from Hunter before either gets scoped — neither is a "just build it"
-item.
+Phase 2 is done, the memory-footprint risk is bounded (not fully closed
+— see Section 5 item 2), custom grid spacing is superseded by the
+1-inch grid, and the critique-pack export is dropped outright — none of
+those are pending work anymore. What's left both genuinely open and
+worth doing:
+
+- **Design the actual update workflow**, now that Hunter's answered the
+  installer question in direction ("for a product, an installer"): what
+  does going from "I have a new idea" to "a user is running the new
+  build" actually look like? An installer alone (e.g. Inno Setup)
+  handles the icon/shortcut/Defender friction from a fresh install, but
+  doesn't by itself give you *update* delivery (checking for a new
+  version, prompting, re-running the installer) — that's a separate
+  piece of design/scope, and it's the exact friction Hunter flagged as
+  the deciding factor. Worth scoping concretely before committing
+  engineering time to either half.
+- **Multiple open projects/tabs** (Section 6 item 5) — still
+  unanswered, still gated on explicit sign-off given the complexity/
+  mental-model cost already flagged.
 
 ---
 
