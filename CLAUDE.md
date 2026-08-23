@@ -53,6 +53,30 @@ pytest tests/test_undo_commands.py       # single file
 pytest tests/test_undo_commands.py -k some_test_name   # single test
 ```
 
+### Linux venv setup
+
+Same commands, different venv layout (`bin/` instead of `Scripts/`):
+
+```
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt          # PySide6
+pip install -r requirements-dev.txt      # pytest
+python main.py                           # run the app
+pytest                                   # full test suite
+```
+
+Everything above installs *only* inside `.venv/` — nothing touches
+system Python or system packages, which matters on modern Debian/
+Ubuntu specifically: a plain `pip install` outside a venv on those
+distros fails outright with an "externally-managed-environment" error
+(they lock down system-wide pip on purpose to stop exactly this kind of
+conflict). A venv sidesteps that entirely rather than working around
+it. To fully undo everything: `deactivate` (leaves the venv's shell
+session) then `rm -rf .venv` (deletes it) — the project folder and the
+rest of the system are untouched either way; nothing here ever installs
+with `sudo` or outside `.venv/`.
+
 Tests run headless: `tests/conftest.py` forces
 `QT_QPA_PLATFORM=offscreen` before PySide6 is imported and provides a
 session-scoped `qapp` fixture (Qt allows exactly one `QApplication` per
