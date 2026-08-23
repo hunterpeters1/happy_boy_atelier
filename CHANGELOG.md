@@ -243,6 +243,20 @@ design rationale. Landed in phases.
   appearing tiny as a favicon. The upload page's drop zone also gained
   a real upload-arrow icon instead of being text-only. No functional
   changes — same IDs, same script, verified end-to-end with Playwright.
+- **First real step toward Linux support** — `PhoneUploadDialog._venv_python()`
+  now recognizes the Unix `bin/python` venv layout (macOS/Linux), not
+  just Windows' `Scripts/python.exe`; without this fix, the phone
+  uploader would always report "hasn't been set up yet" on those
+  platforms regardless of whether a venv actually existed. The uploader
+  setup instructions shown in that case also pick the right activation
+  command for the current OS instead of always showing the Windows one.
+  New `HappyBoyAtelierLinux.spec` (kept fully separate from
+  `HappyBoyAtelier.spec` so nothing about the working Windows build is
+  ever at risk) produces a Linux binary — built and smoke-tested for
+  real: launches cleanly, idles in its Qt event loop, zero runtime
+  warnings. macOS support is not part of this pass — no way to test it
+  without real hardware yet, so nothing macOS-specific was written
+  blind.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

@@ -49,6 +49,29 @@ def test_venv_python_none_when_neither_exists(tmp_path, monkeypatch):
     assert dlg_module._venv_python() is None
 
 
+def test_venv_python_finds_unix_layout(tmp_path, monkeypatch):
+    """macOS/Linux venvs use bin/python, not Windows' Scripts/python.exe --
+    this is the fix that makes the uploader launchable at all on those
+    platforms; without it _venv_python() always returned None there even
+    with a real venv present.
+    """
+    monkeypatch.setattr(dlg_module.resources, "uploader_root", lambda: str(tmp_path))
+    python_path = tmp_path / ".venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("")
+
+    assert dlg_module._venv_python() == python_path
+
+
+def test_venv_python_finds_unix_layout_in_plain_venv_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(dlg_module.resources, "uploader_root", lambda: str(tmp_path))
+    python_path = tmp_path / "venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("")
+
+    assert dlg_module._venv_python() == python_path
+
+
 def test_lan_ip_returns_a_nonempty_string():
     # Real network-dependent (falls back to 127.0.0.1 on failure, same as
     # uploader/app.py's own get_lan_ip()) -- this only needs to confirm it

@@ -25,6 +25,7 @@ import io
 import json
 import secrets
 import socket
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QProcess, QProcessEnvironment, Qt, QTimer, QUrl
@@ -61,16 +62,19 @@ _RECOVERY_RETRY_DELAY_MS = 600
 def _venv_python() -> Path | None:
     """Locate the uploader's own venv interpreter. Checks both the
     README-documented `.venv` and the plain `venv` name (some existing
-    setups use that instead), Windows' Scripts/python.exe layout (this
-    app is Windows-only, see CLAUDE.md). None if neither exists, meaning
+    setups use that instead), and both Windows' `Scripts/python.exe`
+    layout and the Unix `bin/python` layout (macOS/Linux) -- a venv only
+    ever has one of these two, so trying both directly is simpler than
+    branching on `sys.platform` first. None if neither exists, meaning
     the artist hasn't run `pip install -r requirements.txt` in uploader/
     yet.
     """
     uploader_dir = Path(resources.uploader_root())
     for venv_name in (".venv", "venv"):
-        candidate = uploader_dir / venv_name / "Scripts" / "python.exe"
-        if candidate.exists():
-            return candidate
+        for sub_path in (("Scripts", "python.exe"), ("bin", "python")):
+            candidate = uploader_dir / venv_name / Path(*sub_path)
+            if candidate.exists():
+                return candidate
     return None
 
 
@@ -163,11 +167,14 @@ class PhoneUploadDialog(QDialog):
     def _start_server(self) -> None:
         venv_python = _venv_python()
         if venv_python is None:
+            activate_line = (
+                ".venv\\Scripts\\activate" if sys.platform == "win32" else "source .venv/bin/activate"
+            )
             self.status_label.setText(
                 "The uploader hasn't been set up yet. Open a terminal in "
                 "uploader/ and run:\n\n"
                 "python -m venv .venv\n"
-                ".venv\\Scripts\\activate\n"
+                f"{activate_line}\n"
                 "pip install -r requirements.txt\n\n"
                 "then try again."
             )
