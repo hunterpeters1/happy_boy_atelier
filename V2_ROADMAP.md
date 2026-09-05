@@ -71,18 +71,20 @@ originally written.)*
   across four files hand-roll the same `mousePressEvent` override +
   selection call. → unified into `InteractiveItem`
   (`app/canvas/interactive_item.py`).
-- 🟡 **Mitigated, not measured.** No performance validation with real
-  reference photo sizes ever happened — full-resolution `QPixmap`s are
-  still held in memory per reference image with no proxy/thumbnail
-  strategy for the *stored* copy (only the on-screen display proxy is
-  downscaled). Rather than measure it, the decision was to bound the
-  worst case instead: reference images are now hard-capped at 15 per
-  project (`MAX_REFERENCE_IMAGES`, `app/constants.py`) — this app plans
-  a painting with a handful of references, not a bulk photo library, so
-  an unbounded count was never actually needed. The per-image memory
-  cost itself is still exactly as unvalidated as it always was; what's
-  changed is that the total exposure now has a firm ceiling instead of
-  being open-ended. See Section 7.
+- ✅ **Mitigated, and now actually measured.** Reference images are
+  hard-capped at 15 per project (`MAX_REFERENCE_IMAGES`,
+  `app/constants.py`) — this app plans a painting with a handful of
+  references, not a bulk photo library, so an unbounded count was never
+  actually needed. Real numbers, not just the cap, now back this up:
+  Hunter tested with 20 real iPhone photos (deliberately past the cap,
+  via a project loaded from before the limit existed) and Task Manager
+  reported 800MB. That lines up almost exactly with the architecture's
+  own math — a 12MP `QPixmap` held uncompressed in memory is ~49MB
+  (4032×3024 px × 4 bytes/px), so 20 images plus ~100-150MB of baseline
+  Qt/Python/UI overhead lands right around 800MB. Unremarkable on any
+  machine with 8GB+ RAM, and at the actual 15-image ceiling the expected
+  total is meaningfully lower still. The long-standing "unvalidated"
+  status is retired — this was checked with real photos, not assumed.
 - ✅ **Shipped, further than proposed.** ~~The Layers panel does two
   jobs.~~ Simultaneously a layer visibility/lock tree and a tool palette,
   reading like a debug panel. → rebuilt as the Project Panel: a real
@@ -260,14 +262,16 @@ UI upgrade plan's own Section D.
    Phase 0 adds more direct-mutation call sites if we don't fix this
    first. This is the main argument for Phase 0 being first, not a
    "someday" item.
-2. **Reference image memory footprint is unvalidated — now bounded
-   instead.** No proxy/preview resolution strategy exists for the
-   *stored* full-resolution copy. Rather than measure real-world photo
-   sets, the project count itself is now hard-capped at 15 per project
-   (see Section 1's matching note) — a deliberate "bound the worst case"
-   choice instead of "characterize the actual cost." Worth revisiting if
-   a future feature needs more than 15 references per project, since the
-   underlying per-image cost still hasn't actually been measured.
+2. **Reference image memory footprint — bounded AND measured now.** No
+   proxy/preview resolution strategy exists for the *stored*
+   full-resolution copy, and the project count is hard-capped at 15 per
+   project (see Section 1's matching note) rather than that cost being
+   engineered away. But it's no longer just a guess: real-world testing
+   with 20 actual iPhone photos measured 800MB, matching the
+   architecture's own math (~49MB per 12MP `QPixmap` held uncompressed
+   in memory, plus baseline app overhead) almost exactly. Unremarkable
+   on any machine with 8GB+ RAM. Worth a fresh look only if a future
+   feature needs more than 15 references per project.
 3. **Packaging fragility is a real cost, not a one-time annoyance.**
    Every future release repeats the icon/`--add-data`/`--collect-all`
    debugging unless the build script is fixed once and reused. — ✅
@@ -336,16 +340,6 @@ selection model, replacing Qt's, since `QGraphicsItem.setSelected()`
 never stuck for children of these `QGraphicsItemGroup` layers).
 
 ### Carried forward from Sections 4–6, still genuinely open
-- Reference-image memory footprint / proxy-resolution strategy (Section
-  1, Section 5 item 2) — **bounded, not resolved.** A hard 15-image
-  per-project cap now exists (`MAX_REFERENCE_IMAGES`), so the worst case
-  is no longer unbounded, but the underlying question — what a realistic
-  reference set (a dozen-plus 12+ MP phone/DSLR photos) actually costs
-  in memory — was never measured and still hasn't been. The display-proxy
-  cache (`_get_display_pixmap()`) fixed the *speed* problem this caused;
-  the *memory* question for the stored full-resolution copy remains open
-  in principle, just capped in practice. Worth an actual measurement pass
-  if 15 ever turns out to be too tight a ceiling.
 - Multiple open projects/tabs (Phase 4) — still gated on Section 6 item
   5; templates and the color eyedropper have since shipped (see Section
   7's Phase 4 status above)
@@ -358,7 +352,11 @@ never stuck for children of these `QGraphicsItemGroup` layers).
 
 Custom grid spacing (Phase 2) and the bundled critique-pack export are
 both now closed — see Phase 2's status above and the "removed" note
-under Batch export presets below, respectively.
+under Batch export presets below, respectively. The reference-image
+memory footprint question (Section 1, Section 5 item 2) is also closed
+now, not just bounded — see Section 1's updated note: real testing with
+20 iPhone photos measured 800MB, matching the architecture's expected
+math closely enough that this no longer needs a dedicated follow-up.
 
 All other Phase 2 items (measurement tool, grayscale/value-check toggle,
 rule-of-thirds/golden-ratio-intersection snapping, true edge-to-edge
