@@ -60,6 +60,11 @@ def main() -> int:
         window.setWindowIcon(icon)
     window.showMaximized()
 
+    # Deliberately called here, not from MainWindow.__init__ -- the test
+    # suite constructs many MainWindows directly without going through
+    # main(), and none of those should ever make a real network call.
+    window.check_for_updates_on_startup()
+
     return app.exec()
 
 

@@ -23,6 +23,8 @@ _DEFAULT_UNIT_KEY = "settings/defaultUnit"
 _DEFAULT_EXPORT_DPI_KEY = "settings/defaultExportDpi"
 _SHOW_RULERS_KEY = "settings/showRulersByDefault"
 _FUTURISTIC_ACCENTS_KEY = "settings/futuristicAccentsEnabled"
+_CHECK_FOR_UPDATES_KEY = "settings/checkForUpdatesEnabled"
+_LAST_DISMISSED_UPDATE_KEY = "settings/lastDismissedUpdateVersion"
 
 # Sentinel or a real interval — 0 specifically means "autosave disabled",
 # distinct from any real millisecond interval, and never itself handed to
@@ -112,3 +114,28 @@ def futuristic_accents_enabled() -> bool:
 
 def set_futuristic_accents_enabled(value: bool) -> None:
     QSettings().setValue(_FUTURISTIC_ACCENTS_KEY, bool(value))
+
+
+def check_for_updates_enabled() -> bool:
+    """On by default -- Hunter's explicit call: a quiet, dismissible
+    startup check is the right default posture for this app, with the
+    toggle here for anyone who'd rather it never phone out at all.
+    """
+    return _as_bool(QSettings().value(_CHECK_FOR_UPDATES_KEY, True), True)
+
+
+def set_check_for_updates_enabled(value: bool) -> None:
+    QSettings().setValue(_CHECK_FOR_UPDATES_KEY, bool(value))
+
+
+def last_dismissed_update_version() -> str:
+    """The version string (e.g. "1.2.0") of the last update notice the
+    artist explicitly dismissed -- so a dismissed notice doesn't keep
+    reappearing on every future launch, but a *newer* release than the
+    one dismissed still gets its own fresh notice.
+    """
+    return str(QSettings().value(_LAST_DISMISSED_UPDATE_KEY, ""))
+
+
+def set_last_dismissed_update_version(version: str) -> None:
+    QSettings().setValue(_LAST_DISMISSED_UPDATE_KEY, version)

@@ -1,5 +1,5 @@
 """SettingsDialog (Options > Settings…): fields seed from current
-settings, Save persists all five, Cancel discards everything changed in
+settings, Save persists all six, Cancel discards everything changed in
 the dialog.
 """
 
@@ -22,7 +22,7 @@ def clean_settings(qapp):
     keys = [
         "settings/autosaveIntervalMs", "settings/defaultUnit",
         "settings/defaultExportDpi", "settings/showRulersByDefault",
-        "settings/futuristicAccentsEnabled",
+        "settings/futuristicAccentsEnabled", "settings/checkForUpdatesEnabled",
     ]
     for key in keys:
         QSettings().remove(key)
@@ -37,6 +37,7 @@ def test_fields_seed_from_current_settings(clean_settings):
     settings.set_default_export_dpi(150)
     settings.set_show_rulers_by_default(False)
     settings.set_futuristic_accents_enabled(False)
+    settings.set_check_for_updates_enabled(False)
 
     dlg = SettingsDialog()
 
@@ -45,6 +46,7 @@ def test_fields_seed_from_current_settings(clean_settings):
     assert dlg.dpi_spin.value() == 150
     assert dlg.rulers_check.isChecked() is False
     assert dlg.accents_check.isChecked() is False
+    assert dlg.check_updates_check.isChecked() is False
 
 
 def test_fields_seed_from_defaults_when_nothing_set(clean_settings):
@@ -55,15 +57,17 @@ def test_fields_seed_from_defaults_when_nothing_set(clean_settings):
     assert dlg.dpi_spin.value() == 300
     assert dlg.rulers_check.isChecked() is True
     assert dlg.accents_check.isChecked() is True
+    assert dlg.check_updates_check.isChecked() is True
 
 
-def test_save_persists_all_five_fields(clean_settings):
+def test_save_persists_all_six_fields(clean_settings):
     dlg = SettingsDialog()
     dlg.autosave_combo.setCurrentIndex(dlg.autosave_combo.findData(60_000))
     dlg.unit_combo.setCurrentText("px")
     dlg.dpi_spin.setValue(600)
     dlg.rulers_check.setChecked(False)
     dlg.accents_check.setChecked(False)
+    dlg.check_updates_check.setChecked(False)
 
     dlg._on_save()
 
@@ -72,6 +76,7 @@ def test_save_persists_all_five_fields(clean_settings):
     assert settings.default_export_dpi() == 600
     assert settings.show_rulers_by_default() is False
     assert settings.futuristic_accents_enabled() is False
+    assert settings.check_for_updates_enabled() is False
 
 
 def test_save_accepts_the_dialog(clean_settings):
@@ -85,9 +90,11 @@ def test_cancel_does_not_persist_changes(clean_settings):
     dlg.dpi_spin.setValue(600)
     dlg.unit_combo.setCurrentText("cm")
     dlg.accents_check.setChecked(False)
+    dlg.check_updates_check.setChecked(False)
 
     dlg.reject()
 
     assert settings.default_export_dpi() == 300
     assert settings.default_unit() == "in"
     assert settings.futuristic_accents_enabled() is True
+    assert settings.check_for_updates_enabled() is True

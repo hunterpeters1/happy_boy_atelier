@@ -5,8 +5,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QEasingCurve, QPointF, QPropertyAnimation, QSettings, QSize, QStandardPaths, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QPixmap
+from PySide6.QtCore import (
+    Qt,
+    QEasingCurve,
+    QPointF,
+    QPropertyAnimation,
+    QSettings,
+    QSize,
+    QStandardPaths,
+    QTimer,
+    QUrl,
+)
+from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -28,6 +38,7 @@ from . import project_templates
 from . import recovery
 from . import settings
 from . import themes
+from . import update_check
 from .hacker_status import HackerStatusWidget
 from .theme import apply_theme
 from .atelier_io import (
@@ -134,6 +145,27 @@ class MainWindow(QMainWindow):
         self.status_lock_banner.setVisible(False)
         self.statusBar().addPermanentWidget(self.status_lock_banner)
         self.statusBar().addWidget(self.status_hint)
+
+        # "A newer version exists" notice -- see app/update_check.py.
+        # addPermanentWidget (not addWidget), same reasoning as
+        # focus_opacity_label/slider below: a permanent widget survives
+        # a showMessage() call covering the temporary-message area,
+        # which this notice must not disappear behind just because the
+        # artist saved a file a moment later. Hidden until an actual
+        # newer release is found; _pending_update_version tracks which
+        # version the currently-shown notice is for, so dismissing it
+        # records the right version (see _on_update_notice_link()).
+        self.update_notice_label = QLabel("")
+        self.update_notice_label.setProperty("role", "update-notice")
+        self.update_notice_label.setTextFormat(Qt.RichText)
+        self.update_notice_label.setOpenExternalLinks(False)
+        self.update_notice_label.setVisible(False)
+        self.update_notice_label.linkActivated.connect(self._on_update_notice_link)
+        self._pending_update_version = ""
+        self.statusBar().addPermanentWidget(self.update_notice_label)
+
+        self._update_checker = update_check.UpdateChecker(self)
+        self._update_checker.update_available.connect(self._on_update_available)
 
         # Focus Mode's window-opacity slider — permanent widgets (unlike
         # status_hint above, added via addWidget) stay visible even while
@@ -805,6 +837,35 @@ class MainWindow(QMainWindow):
             # New Painting, a future Export, a future window launch), not
             # cached anywhere on self.
             self._apply_autosave_interval()
+
+    def check_for_updates_on_startup(self) -> None:
+        """Called once from main.py's real entry point, deliberately not
+        from __init__ -- tests construct many MainWindows directly
+        without going through main(), and none of those should ever
+        make a real network call. Respects the Settings toggle itself
+        (rather than main.py checking it) so the on/off decision lives
+        in one place.
+        """
+        if settings.check_for_updates_enabled():
+            self._update_checker.check()
+
+    def _on_update_available(self, version: str, release_url: str) -> None:
+        if version == settings.last_dismissed_update_version():
+            return
+        self._pending_update_version = version
+        self.update_notice_label.setText(
+            f'<a href="{release_url}" style="color:{C.COLOR_BRASS_BRIGHT};">'
+            f"Update available: v{version}</a> &nbsp; "
+            f'<a href="dismiss" style="color:{C.COLOR_INK_DIM};">✕</a>'
+        )
+        self.update_notice_label.setVisible(True)
+
+    def _on_update_notice_link(self, link: str) -> None:
+        if link == "dismiss":
+            settings.set_last_dismissed_update_version(self._pending_update_version)
+            self.update_notice_label.setVisible(False)
+        else:
+            QDesktopServices.openUrl(QUrl(link))
 
     def _show_phone_upload(self) -> None:
         # Non-modal (show(), not exec()) — see PhoneUploadDialog's own

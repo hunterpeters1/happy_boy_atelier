@@ -22,7 +22,8 @@ def clean_settings(qapp):
     keys = [
         "settings/autosaveIntervalMs", "settings/defaultUnit",
         "settings/defaultExportDpi", "settings/showRulersByDefault",
-        "settings/futuristicAccentsEnabled",
+        "settings/futuristicAccentsEnabled", "settings/checkForUpdatesEnabled",
+        "settings/lastDismissedUpdateVersion",
     ]
     for key in keys:
         QSettings().remove(key)
@@ -37,6 +38,8 @@ def test_defaults_when_nothing_set(clean_settings):
     assert settings.default_export_dpi() == 300
     assert settings.show_rulers_by_default() is True
     assert settings.futuristic_accents_enabled() is True
+    assert settings.check_for_updates_enabled() is True
+    assert settings.last_dismissed_update_version() == ""
 
 
 def test_autosave_interval_round_trips(clean_settings):
@@ -105,5 +108,22 @@ def test_futuristic_accents_round_trips(clean_settings):
 def test_futuristic_accents_handles_string_backed_bool(clean_settings):
     QSettings().setValue("settings/futuristicAccentsEnabled", "false")
     assert settings.futuristic_accents_enabled() is False
+
+
+def test_check_for_updates_round_trips(clean_settings):
+    settings.set_check_for_updates_enabled(False)
+    assert settings.check_for_updates_enabled() is False
+    settings.set_check_for_updates_enabled(True)
+    assert settings.check_for_updates_enabled() is True
+
+
+def test_check_for_updates_handles_string_backed_bool(clean_settings):
+    QSettings().setValue("settings/checkForUpdatesEnabled", "false")
+    assert settings.check_for_updates_enabled() is False
+
+
+def test_last_dismissed_update_version_round_trips(clean_settings):
+    settings.set_last_dismissed_update_version("1.2.0")
+    assert settings.last_dismissed_update_version() == "1.2.0"
     QSettings().setValue("settings/futuristicAccentsEnabled", "true")
     assert settings.futuristic_accents_enabled() is True

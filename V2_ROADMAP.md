@@ -299,13 +299,17 @@ UI upgrade plan's own Section D.
    roadmap — want to confirm it's earning that cost before scoping it in.
    Moot as of the projector mode removal — nothing to correct keystone
    *of* anymore.
-2. **Installer vs. portable exe:** ✅ **answered in direction.** For a
-   real product, Hunter wants an installer, not a portable exe. The
-   condition attached: the deciding factor is how annoying it is to get
-   a new build in front of users after a fresh idea, not the initial
-   install experience — so this isn't fully scoped until that update
-   workflow (checking for/delivering a new version, not just the first
-   install) is actually designed. See Section 7's "concrete next phase."
+2. **Installer vs. portable exe:** ✅ **direction confirmed, half built.**
+   For a real product, Hunter wants an installer, not a portable exe.
+   The condition attached was update friction, not the initial install
+   experience — and that half is now actually done: a quiet, dismissible
+   "a newer version exists" check (`app/update_check.py`, on by default,
+   toggle in Settings) pings this repo's GitHub releases once per
+   launch and links to the new release if one exists. What's still
+   genuinely unbuilt is the installer itself (Inno Setup `.iss` script,
+   producing a real installed/uninstallable app instead of a portable
+   `.exe`) — the two were always separable, and only the update-check
+   half has shipped so far. See Section 7's "concrete next phase."
 3. **Grayscale value-check and color eyedropper — philosophy check:**
    both are informational (they help the artist see/measure) rather than
    generative. My read is they're consistent with "artist decides,
@@ -343,12 +347,10 @@ never stuck for children of these `QGraphicsItemGroup` layers).
 - Multiple open projects/tabs (Phase 4) — still gated on Section 6 item
   5; templates and the color eyedropper have since shipped (see Section
   7's Phase 4 status above)
-- Installer vs. portable exe (Section 6 item 2) — **answered in
-  direction, not yet in detail:** for a real product, Hunter's call is
-  an installer, not a portable exe. The condition attached is update
-  friction — how annoying it is to ship a new build after a fresh idea
-  — so this isn't fully scoped until that update workflow is actually
-  designed (see Section 6 item 2's updated note).
+- Installer vs. portable exe (Section 6 item 2) — **half built.** The
+  update-check/notify piece Hunter's condition actually hinged on has
+  shipped (see the new bullet below); the installer itself (Inno Setup)
+  has not (see Section 6 item 2's updated note).
 
 Custom grid spacing (Phase 2) and the bundled critique-pack export are
 both now closed — see Phase 2's status above and the "removed" note
@@ -411,24 +413,29 @@ phase's own commit — not an oversight — kept here so they aren't lost:
   same corner-rivet hardware motif the desktop app uses on its canvas
   and dock title bars, and the actual "HB" app icon rendered large as a
   proper logo instead of only ever appearing tiny as a favicon.
+- **Update-check notice** — ✅ done (`app/update_check.py`, on by
+  default, toggle in Settings): a quiet, silent-on-any-failure check
+  against this repo's GitHub releases once per launch, surfacing a
+  dismissible status-bar note (never a modal, never an auto-download)
+  only when a genuinely newer version exists. This was the actual
+  condition behind Hunter's installer answer in Section 6 item 2 — the
+  installer itself is still unbuilt, but the piece that made "annoying
+  to update" a real concern now has an answer.
 
 ### A concrete next phase, if picking one
 Phase 2 is done, the memory-footprint risk is bounded (not fully closed
 — see Section 5 item 2), custom grid spacing is superseded by the
-1-inch grid, and the critique-pack export is dropped outright — none of
+1-inch grid, the critique-pack export is dropped outright, and the
+update-check half of the installer question has shipped — none of
 those are pending work anymore. What's left both genuinely open and
 worth doing:
 
-- **Design the actual update workflow**, now that Hunter's answered the
-  installer question in direction ("for a product, an installer"): what
-  does going from "I have a new idea" to "a user is running the new
-  build" actually look like? An installer alone (e.g. Inno Setup)
-  handles the icon/shortcut/Defender friction from a fresh install, but
-  doesn't by itself give you *update* delivery (checking for a new
-  version, prompting, re-running the installer) — that's a separate
-  piece of design/scope, and it's the exact friction Hunter flagged as
-  the deciding factor. Worth scoping concretely before committing
-  engineering time to either half.
+- **Build the actual installer** (Inno Setup `.iss` script) — the
+  remaining half of Section 6 item 2. Now that the update-check side
+  exists to pair with it, this is unblocked and just needs doing:
+  package the existing `HappyBoyAtelier.spec` output into a real
+  installed/uninstallable app (Start Menu entry, upgrade-in-place
+  support) instead of a portable `.exe`.
 - **Multiple open projects/tabs** (Section 6 item 5) — still
   unanswered, still gated on explicit sign-off given the complexity/
   mental-model cost already flagged.

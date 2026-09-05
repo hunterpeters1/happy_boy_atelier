@@ -257,6 +257,19 @@ design rationale. Landed in phases.
   warnings. macOS support is not part of this pass — no way to test it
   without real hardware yet, so nothing macOS-specific was written
   blind.
+- **A quiet "update available" check on startup** (`app/update_check.py`,
+  on by default, toggle in Settings) — pings this app's own GitHub
+  releases once per launch and, only if a genuinely newer version
+  exists, shows a dismissible note in the status bar linking to it.
+  Never downloads or installs anything itself, and fails completely
+  silently on any error (no internet, GitHub unreachable, no releases
+  published yet, a malformed response) — this is a nice-to-know, never
+  something that should look like the app is broken. Dismissing a note
+  is remembered per-version (`QSettings`), so it won't reappear for that
+  release but a later one still gets its own note. Deliberately wired
+  from `main.py`'s real entry point, not `MainWindow.__init__`, so the
+  test suite's many direct `MainWindow()` constructions never make a
+  real network call.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 

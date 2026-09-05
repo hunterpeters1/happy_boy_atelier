@@ -14,6 +14,13 @@ APP_ORG = "HappyBoyAtelier"
 APP_VERSION = "1.0.0"
 FORMAT_VERSION = 1
 
+# Used only by app/update_check.py to build the GitHub Releases API URL
+# and the "view release" link -- this repo is where builds actually get
+# published, so it's the free, already-available source of truth for
+# "is there a newer version" rather than standing up any server of our
+# own.
+GITHUB_REPO = "hunterpeters1/happy_boy_atelier"
+
 # Phase 0.3: autosave interval for the crash-recovery snapshot (not the
 # user's own Save/Save As, which stays fully manual). Hardcoded for now —
 # architecture should stay flexible enough to expose this as a user
