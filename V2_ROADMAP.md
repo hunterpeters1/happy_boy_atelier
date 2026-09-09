@@ -249,10 +249,10 @@ UI upgrade plan's own Section D.
 - ✅ Color eyedropper / swatch reference from imported photos — shipped
   earlier than this document tracked (README's Eyedropper + Swatches
   dock)
-- ⬜ Multiple open projects (tabs) — **high complexity, changes the app's
-  mental model from "one project, one window."** Not recommended without
-  explicit sign-off; current workaround (launch the app again) may simply
-  be fine. Still unanswered — see Section 6, item 5.
+- ❌ Multiple open projects (tabs) — **declined.** "I don't care for
+  having multiple open projects" — Hunter's explicit answer to Section
+  6 item 5. The current workaround (launch the app again for a second
+  project) stays the model; not pursuing this further.
 
 ---
 
@@ -318,9 +318,9 @@ UI upgrade plan's own Section D.
 4. **Templates (Phase 4):** is this a near-term need (you regularly start
    new paintings from a similar canvas+guide setup) or a nice-to-have?
    Changes whether it belongs in Phase 2 or stays deferred.
-5. **Multiple open projects (tabs):** genuinely changes the app's mental
-   model. Confirm whether "one project per window instance" is an actual
-   limitation worth the complexity, or whether it's fine as-is.
+5. **Multiple open projects (tabs):** ❌ **answered — declined.** "I
+   don't care for having multiple open projects." One project per
+   window instance stays the model; not pursuing this.
 6. **Any branding/identity work** (splash screen, credits, a proper name
    for the "recent projects" screen, etc.) you want folded into Phase 1's
    UI polish while that work is already happening? — the naming half
@@ -344,13 +344,17 @@ selection model, replacing Qt's, since `QGraphicsItem.setSelected()`
 never stuck for children of these `QGraphicsItemGroup` layers).
 
 ### Carried forward from Sections 4–6, still genuinely open
-- Multiple open projects/tabs (Phase 4) — still gated on Section 6 item
-  5; templates and the color eyedropper have since shipped (see Section
-  7's Phase 4 status above)
-- Installer vs. portable exe (Section 6 item 2) — **half built.** The
-  update-check/notify piece Hunter's condition actually hinged on has
-  shipped (see the new bullet below); the installer itself (Inno Setup)
-  has not (see Section 6 item 2's updated note).
+- Installer vs. portable exe (Section 6 item 2) — **half built, other
+  half paused, not declined.** The update-check/notify piece Hunter's
+  condition actually hinged on has shipped (see the new bullet below);
+  the installer itself (Inno Setup) is deliberately on hold — "let's
+  hold off on the Inno Setup installer" — not something being pursued
+  right now, but not ruled out either.
+
+Multiple open projects/tabs (Phase 4, Section 6 item 5) is now
+answered, not open — Hunter declined it outright ("I don't care for
+having multiple open projects"). See Phase 4's status and Section 6
+item 5 above.
 
 Custom grid spacing (Phase 2) and the bundled critique-pack export are
 both now closed — see Phase 2's status above and the "removed" note
@@ -368,14 +372,20 @@ snapping) have since shipped — see Phase 2's status above.
 Each of these was a deliberate, explicitly-flagged scope cut in its
 phase's own commit — not an oversight — kept here so they aren't lost:
 
-- **Drag-to-reorder within a layer** in the Project Panel. No layer
-  group class exposes a reorder operation yet; needs that added first,
-  then the tree's drag/drop wiring.
-- **True hover-reveal row icons** in the Project Panel (visibility/lock
-  icons only appearing on hover, per the original redesign vision).
-  Needs a custom `QTreeWidget` item delegate; the icons are small and
-  always-visible instead for now, which is a reasonable permanent state
-  too if hover-reveal turns out not to be worth the delegate complexity.
+- **Drag-to-reorder within a layer** in the Project Panel — ✅ done
+  (`_ReorderableTree`, `MoveItemToIndexCommand`): reference/composition/
+  lighting rows can be dragged to a new position within their own layer
+  section; a drag can't cross into a different layer's section. This
+  entry was stale here for a while after it actually shipped — see
+  `CHANGELOG.md`.
+- **True hover-reveal row icons** in the Project Panel — ✅ done
+  (`app/panels/row_hover.py`): item rows' eye/lock icons rest dim and
+  rise to full opacity on hover, reusing the same fade
+  `app/scrollbars.py` already uses for scrollbar handles — no custom
+  delegate needed after all, `_RowButtons` was already a persistent
+  per-row widget. A row whose lock/visibility was actually toggled away
+  from its default stays legible even at rest. Same as above, this
+  entry didn't get updated when the feature landed.
 - **A cross-project reference library.** — ✅ done
   (`app/library.py`, `app/panels/library_panel.py`): a personal
   collection independent of any one painting, drag-or-double-click into
@@ -385,7 +395,9 @@ phase's own commit — not an oversight — kept here so they aren't lost:
   treat `.atelier` files there like any other project) as a "work across
   two machines" answer that doesn't compromise the "no cloud accounts"
   design commitment, since there's no account or server involved — just
-  a folder the artist already trusts.
+  a folder the artist already trusts. **Low priority per Hunter** — "not
+  important, I might not care for it at all." Kept here as a still-live
+  idea, not promoted to anything with real scope behind it.
 - **Batch export presets** — ✅ done (`app/dialogs/export_dialog.py`'s
   Preset combo: save a named format/DPI/Study-Blur configuration, reuse
   it across paintings). A bundled "critique pack" export (canvas render
@@ -425,20 +437,26 @@ phase's own commit — not an oversight — kept here so they aren't lost:
 ### A concrete next phase, if picking one
 Phase 2 is done, the memory-footprint risk is bounded (not fully closed
 — see Section 5 item 2), custom grid spacing is superseded by the
-1-inch grid, the critique-pack export is dropped outright, and the
-update-check half of the installer question has shipped — none of
-those are pending work anymore. What's left both genuinely open and
-worth doing:
+1-inch grid, the critique-pack export is dropped outright, the
+update-check half of the installer question has shipped, and multiple
+open projects/tabs is answered (declined) — none of those are pending
+work anymore. What's left:
 
-- **Build the actual installer** (Inno Setup `.iss` script) — the
-  remaining half of Section 6 item 2. Now that the update-check side
-  exists to pair with it, this is unblocked and just needs doing:
-  package the existing `HappyBoyAtelier.spec` output into a real
-  installed/uninstallable app (Start Menu entry, upgrade-in-place
-  support) instead of a portable `.exe`.
-- **Multiple open projects/tabs** (Section 6 item 5) — still
-  unanswered, still gated on explicit sign-off given the complexity/
-  mental-model cost already flagged.
+- **The installer itself** (Inno Setup `.iss` script, the remaining
+  half of Section 6 item 2) — explicitly paused, not declined: "let's
+  hold off on the Inno Setup installer." Not scoped further until
+  Hunter picks it back up.
+- **Folder-based sync** — low priority per Hunter ("not important, I
+  might not care for it at all"); kept as a live idea, not something
+  with real scope behind it.
+
+With the installer paused and tabs declined, there's no single
+"obviously next" item left on this document right now — the two
+outstanding threads (drag-to-reorder and hover-reveal row icons) that
+used to sit here as open work turned out to already be shipped (see
+the corrected notes above); what's left is either explicitly paused or
+explicitly low-priority. Worth a fresh conversation with Hunter for
+what actually comes next, rather than defaulting to either of these.
 
 ---
 
