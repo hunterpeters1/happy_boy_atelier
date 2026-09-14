@@ -257,15 +257,6 @@ design rationale. Landed in phases.
   warnings. macOS support is not part of this pass — no way to test it
   without real hardware yet, so nothing macOS-specific was written
   blind.
-- **New app icon** — replaces the "HB" monogram with a viewfinder/crop
-  frame mark: four brass corner brackets around a single focal-point dot
-  (`make_icon.py`), on the same dark-graphite tile with the same four
-  corner rivets as before. The monogram read as a lettering exercise;
-  the corner-bracket frame is the same shape a camera viewfinder or crop
-  tool uses, closer to what the app is actually for (composing a shot
-  before painting it), and the center dot echoes the real Composition
-  layer's own focal-point marker (`FocalPointItem` in
-  `app/layers/composition_layer.py`). Confirmed legible down to 16px.
 
 ## Unreleased — UX redesign ("Studio, Not Software")
 
