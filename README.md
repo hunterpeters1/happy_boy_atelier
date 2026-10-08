@@ -250,11 +250,12 @@ Mode, a developer theme with extra debug tools.
 - **Options > Settings…** — a few standard defaults you can customize:
   autosave interval (or turn it off entirely), the unit New Painting
   starts with, the DPI Export starts with, whether new windows show
-  rulers by default, and Futuristic UI accents (below). All are pure
-  workflow preferences — nothing here is saved into any painting, and
-  changing one only affects what happens *next* (a future New Painting,
-  a future Export, a future autosave tick), never anything already open
-  or already exported. Autosave and the accents toggle take effect
+  rulers by default, Futuristic UI accents (below), and whether the app
+  checks for a newer version on startup. All are pure workflow
+  preferences — nothing here is saved into any painting, and changing
+  one only affects what happens *next* (a future New Painting, a future
+  Export, a future autosave tick), never anything already open or
+  already exported. Autosave and the accents toggle take effect
   immediately; the others apply the next time that dialog/window opens.
 - **Options > Upload From Phone…** — see below.
 - **Options > About Happy Boy Atelier** shows the app's version and
@@ -269,6 +270,15 @@ restored after Focus Mode), and softened, curved rendering for movement
 lines instead of hard straight segments. Every one of these has a plain,
 instant equivalent when the setting is off — nothing is gated behind it,
 only the animation/softening around it.
+
+**Checking for updates** (on by default, toggle in Settings) is a single
+quiet check against this app's GitHub releases each time it starts —
+nothing downloads or installs automatically. If a newer version exists,
+a dismissible note appears in the status bar with a link to it; nothing
+appears at all otherwise (no internet, no newer version, GitHub
+unreachable — all handled the same way, silently). Dismissing a note
+means you won't see it again for that specific version, but a later
+release still gets its own note.
 
 ## Upload from phone
 

@@ -71,18 +71,20 @@ originally written.)*
   across four files hand-roll the same `mousePressEvent` override +
   selection call. → unified into `InteractiveItem`
   (`app/canvas/interactive_item.py`).
-- 🟡 **Mitigated, not measured.** No performance validation with real
-  reference photo sizes ever happened — full-resolution `QPixmap`s are
-  still held in memory per reference image with no proxy/thumbnail
-  strategy for the *stored* copy (only the on-screen display proxy is
-  downscaled). Rather than measure it, the decision was to bound the
-  worst case instead: reference images are now hard-capped at 15 per
-  project (`MAX_REFERENCE_IMAGES`, `app/constants.py`) — this app plans
-  a painting with a handful of references, not a bulk photo library, so
-  an unbounded count was never actually needed. The per-image memory
-  cost itself is still exactly as unvalidated as it always was; what's
-  changed is that the total exposure now has a firm ceiling instead of
-  being open-ended. See Section 7.
+- ✅ **Mitigated, and now actually measured.** Reference images are
+  hard-capped at 15 per project (`MAX_REFERENCE_IMAGES`,
+  `app/constants.py`) — this app plans a painting with a handful of
+  references, not a bulk photo library, so an unbounded count was never
+  actually needed. Real numbers, not just the cap, now back this up:
+  Hunter tested with 20 real iPhone photos (deliberately past the cap,
+  via a project loaded from before the limit existed) and Task Manager
+  reported 800MB. That lines up almost exactly with the architecture's
+  own math — a 12MP `QPixmap` held uncompressed in memory is ~49MB
+  (4032×3024 px × 4 bytes/px), so 20 images plus ~100-150MB of baseline
+  Qt/Python/UI overhead lands right around 800MB. Unremarkable on any
+  machine with 8GB+ RAM, and at the actual 15-image ceiling the expected
+  total is meaningfully lower still. The long-standing "unvalidated"
+  status is retired — this was checked with real photos, not assumed.
 - ✅ **Shipped, further than proposed.** ~~The Layers panel does two
   jobs.~~ Simultaneously a layer visibility/lock tree and a tool palette,
   reading like a debug panel. → rebuilt as the Project Panel: a real
@@ -247,10 +249,10 @@ UI upgrade plan's own Section D.
 - ✅ Color eyedropper / swatch reference from imported photos — shipped
   earlier than this document tracked (README's Eyedropper + Swatches
   dock)
-- ⬜ Multiple open projects (tabs) — **high complexity, changes the app's
-  mental model from "one project, one window."** Not recommended without
-  explicit sign-off; current workaround (launch the app again) may simply
-  be fine. Still unanswered — see Section 6, item 5.
+- ❌ Multiple open projects (tabs) — **declined.** "I don't care for
+  having multiple open projects" — Hunter's explicit answer to Section
+  6 item 5. The current workaround (launch the app again for a second
+  project) stays the model; not pursuing this further.
 
 ---
 
@@ -260,14 +262,16 @@ UI upgrade plan's own Section D.
    Phase 0 adds more direct-mutation call sites if we don't fix this
    first. This is the main argument for Phase 0 being first, not a
    "someday" item.
-2. **Reference image memory footprint is unvalidated — now bounded
-   instead.** No proxy/preview resolution strategy exists for the
-   *stored* full-resolution copy. Rather than measure real-world photo
-   sets, the project count itself is now hard-capped at 15 per project
-   (see Section 1's matching note) — a deliberate "bound the worst case"
-   choice instead of "characterize the actual cost." Worth revisiting if
-   a future feature needs more than 15 references per project, since the
-   underlying per-image cost still hasn't actually been measured.
+2. **Reference image memory footprint — bounded AND measured now.** No
+   proxy/preview resolution strategy exists for the *stored*
+   full-resolution copy, and the project count is hard-capped at 15 per
+   project (see Section 1's matching note) rather than that cost being
+   engineered away. But it's no longer just a guess: real-world testing
+   with 20 actual iPhone photos measured 800MB, matching the
+   architecture's own math (~49MB per 12MP `QPixmap` held uncompressed
+   in memory, plus baseline app overhead) almost exactly. Unremarkable
+   on any machine with 8GB+ RAM. Worth a fresh look only if a future
+   feature needs more than 15 references per project.
 3. **Packaging fragility is a real cost, not a one-time annoyance.**
    Every future release repeats the icon/`--add-data`/`--collect-all`
    debugging unless the build script is fixed once and reused. — ✅
@@ -295,13 +299,17 @@ UI upgrade plan's own Section D.
    roadmap — want to confirm it's earning that cost before scoping it in.
    Moot as of the projector mode removal — nothing to correct keystone
    *of* anymore.
-2. **Installer vs. portable exe:** ✅ **answered in direction.** For a
-   real product, Hunter wants an installer, not a portable exe. The
-   condition attached: the deciding factor is how annoying it is to get
-   a new build in front of users after a fresh idea, not the initial
-   install experience — so this isn't fully scoped until that update
-   workflow (checking for/delivering a new version, not just the first
-   install) is actually designed. See Section 7's "concrete next phase."
+2. **Installer vs. portable exe:** ✅ **direction confirmed, half built.**
+   For a real product, Hunter wants an installer, not a portable exe.
+   The condition attached was update friction, not the initial install
+   experience — and that half is now actually done: a quiet, dismissible
+   "a newer version exists" check (`app/update_check.py`, on by default,
+   toggle in Settings) pings this repo's GitHub releases once per
+   launch and links to the new release if one exists. What's still
+   genuinely unbuilt is the installer itself (Inno Setup `.iss` script,
+   producing a real installed/uninstallable app instead of a portable
+   `.exe`) — the two were always separable, and only the update-check
+   half has shipped so far. See Section 7's "concrete next phase."
 3. **Grayscale value-check and color eyedropper — philosophy check:**
    both are informational (they help the artist see/measure) rather than
    generative. My read is they're consistent with "artist decides,
@@ -310,9 +318,9 @@ UI upgrade plan's own Section D.
 4. **Templates (Phase 4):** is this a near-term need (you regularly start
    new paintings from a similar canvas+guide setup) or a nice-to-have?
    Changes whether it belongs in Phase 2 or stays deferred.
-5. **Multiple open projects (tabs):** genuinely changes the app's mental
-   model. Confirm whether "one project per window instance" is an actual
-   limitation worth the complexity, or whether it's fine as-is.
+5. **Multiple open projects (tabs):** ❌ **answered — declined.** "I
+   don't care for having multiple open projects." One project per
+   window instance stays the model; not pursuing this.
 6. **Any branding/identity work** (splash screen, credits, a proper name
    for the "recent projects" screen, etc.) you want folded into Phase 1's
    UI polish while that work is already happening? — the naming half
@@ -336,29 +344,25 @@ selection model, replacing Qt's, since `QGraphicsItem.setSelected()`
 never stuck for children of these `QGraphicsItemGroup` layers).
 
 ### Carried forward from Sections 4–6, still genuinely open
-- Reference-image memory footprint / proxy-resolution strategy (Section
-  1, Section 5 item 2) — **bounded, not resolved.** A hard 15-image
-  per-project cap now exists (`MAX_REFERENCE_IMAGES`), so the worst case
-  is no longer unbounded, but the underlying question — what a realistic
-  reference set (a dozen-plus 12+ MP phone/DSLR photos) actually costs
-  in memory — was never measured and still hasn't been. The display-proxy
-  cache (`_get_display_pixmap()`) fixed the *speed* problem this caused;
-  the *memory* question for the stored full-resolution copy remains open
-  in principle, just capped in practice. Worth an actual measurement pass
-  if 15 ever turns out to be too tight a ceiling.
-- Multiple open projects/tabs (Phase 4) — still gated on Section 6 item
-  5; templates and the color eyedropper have since shipped (see Section
-  7's Phase 4 status above)
-- Installer vs. portable exe (Section 6 item 2) — **answered in
-  direction, not yet in detail:** for a real product, Hunter's call is
-  an installer, not a portable exe. The condition attached is update
-  friction — how annoying it is to ship a new build after a fresh idea
-  — so this isn't fully scoped until that update workflow is actually
-  designed (see Section 6 item 2's updated note).
+- Installer vs. portable exe (Section 6 item 2) — **half built, other
+  half paused, not declined.** The update-check/notify piece Hunter's
+  condition actually hinged on has shipped (see the new bullet below);
+  the installer itself (Inno Setup) is deliberately on hold — "let's
+  hold off on the Inno Setup installer" — not something being pursued
+  right now, but not ruled out either.
+
+Multiple open projects/tabs (Phase 4, Section 6 item 5) is now
+answered, not open — Hunter declined it outright ("I don't care for
+having multiple open projects"). See Phase 4's status and Section 6
+item 5 above.
 
 Custom grid spacing (Phase 2) and the bundled critique-pack export are
 both now closed — see Phase 2's status above and the "removed" note
-under Batch export presets below, respectively.
+under Batch export presets below, respectively. The reference-image
+memory footprint question (Section 1, Section 5 item 2) is also closed
+now, not just bounded — see Section 1's updated note: real testing with
+20 iPhone photos measured 800MB, matching the architecture's expected
+math closely enough that this no longer needs a dedicated follow-up.
 
 All other Phase 2 items (measurement tool, grayscale/value-check toggle,
 rule-of-thirds/golden-ratio-intersection snapping, true edge-to-edge
@@ -368,14 +372,20 @@ snapping) have since shipped — see Phase 2's status above.
 Each of these was a deliberate, explicitly-flagged scope cut in its
 phase's own commit — not an oversight — kept here so they aren't lost:
 
-- **Drag-to-reorder within a layer** in the Project Panel. No layer
-  group class exposes a reorder operation yet; needs that added first,
-  then the tree's drag/drop wiring.
-- **True hover-reveal row icons** in the Project Panel (visibility/lock
-  icons only appearing on hover, per the original redesign vision).
-  Needs a custom `QTreeWidget` item delegate; the icons are small and
-  always-visible instead for now, which is a reasonable permanent state
-  too if hover-reveal turns out not to be worth the delegate complexity.
+- **Drag-to-reorder within a layer** in the Project Panel — ✅ done
+  (`_ReorderableTree`, `MoveItemToIndexCommand`): reference/composition/
+  lighting rows can be dragged to a new position within their own layer
+  section; a drag can't cross into a different layer's section. This
+  entry was stale here for a while after it actually shipped — see
+  `CHANGELOG.md`.
+- **True hover-reveal row icons** in the Project Panel — ✅ done
+  (`app/panels/row_hover.py`): item rows' eye/lock icons rest dim and
+  rise to full opacity on hover, reusing the same fade
+  `app/scrollbars.py` already uses for scrollbar handles — no custom
+  delegate needed after all, `_RowButtons` was already a persistent
+  per-row widget. A row whose lock/visibility was actually toggled away
+  from its default stays legible even at rest. Same as above, this
+  entry didn't get updated when the feature landed.
 - **A cross-project reference library.** — ✅ done
   (`app/library.py`, `app/panels/library_panel.py`): a personal
   collection independent of any one painting, drag-or-double-click into
@@ -385,7 +395,9 @@ phase's own commit — not an oversight — kept here so they aren't lost:
   treat `.atelier` files there like any other project) as a "work across
   two machines" answer that doesn't compromise the "no cloud accounts"
   design commitment, since there's no account or server involved — just
-  a folder the artist already trusts.
+  a folder the artist already trusts. **Low priority per Hunter** — "not
+  important, I might not care for it at all." Kept here as a still-live
+  idea, not promoted to anything with real scope behind it.
 - **Batch export presets** — ✅ done (`app/dialogs/export_dialog.py`'s
   Preset combo: save a named format/DPI/Study-Blur configuration, reuse
   it across paintings). A bundled "critique pack" export (canvas render
@@ -413,27 +425,38 @@ phase's own commit — not an oversight — kept here so they aren't lost:
   same corner-rivet hardware motif the desktop app uses on its canvas
   and dock title bars, and the actual "HB" app icon rendered large as a
   proper logo instead of only ever appearing tiny as a favicon.
+- **Update-check notice** — ✅ done (`app/update_check.py`, on by
+  default, toggle in Settings): a quiet, silent-on-any-failure check
+  against this repo's GitHub releases once per launch, surfacing a
+  dismissible status-bar note (never a modal, never an auto-download)
+  only when a genuinely newer version exists. This was the actual
+  condition behind Hunter's installer answer in Section 6 item 2 — the
+  installer itself is still unbuilt, but the piece that made "annoying
+  to update" a real concern now has an answer.
 
 ### A concrete next phase, if picking one
 Phase 2 is done, the memory-footprint risk is bounded (not fully closed
 — see Section 5 item 2), custom grid spacing is superseded by the
-1-inch grid, and the critique-pack export is dropped outright — none of
-those are pending work anymore. What's left both genuinely open and
-worth doing:
+1-inch grid, the critique-pack export is dropped outright, the
+update-check half of the installer question has shipped, and multiple
+open projects/tabs is answered (declined) — none of those are pending
+work anymore. What's left:
 
-- **Design the actual update workflow**, now that Hunter's answered the
-  installer question in direction ("for a product, an installer"): what
-  does going from "I have a new idea" to "a user is running the new
-  build" actually look like? An installer alone (e.g. Inno Setup)
-  handles the icon/shortcut/Defender friction from a fresh install, but
-  doesn't by itself give you *update* delivery (checking for a new
-  version, prompting, re-running the installer) — that's a separate
-  piece of design/scope, and it's the exact friction Hunter flagged as
-  the deciding factor. Worth scoping concretely before committing
-  engineering time to either half.
-- **Multiple open projects/tabs** (Section 6 item 5) — still
-  unanswered, still gated on explicit sign-off given the complexity/
-  mental-model cost already flagged.
+- **The installer itself** (Inno Setup `.iss` script, the remaining
+  half of Section 6 item 2) — explicitly paused, not declined: "let's
+  hold off on the Inno Setup installer." Not scoped further until
+  Hunter picks it back up.
+- **Folder-based sync** — low priority per Hunter ("not important, I
+  might not care for it at all"); kept as a live idea, not something
+  with real scope behind it.
+
+With the installer paused and tabs declined, there's no single
+"obviously next" item left on this document right now — the two
+outstanding threads (drag-to-reorder and hover-reveal row icons) that
+used to sit here as open work turned out to already be shipped (see
+the corrected notes above); what's left is either explicitly paused or
+explicitly low-priority. Worth a fresh conversation with Hunter for
+what actually comes next, rather than defaulting to either of these.
 
 ---
 

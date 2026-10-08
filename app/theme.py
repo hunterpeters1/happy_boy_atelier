@@ -317,6 +317,10 @@ def _stylesheet() -> str:
         padding: 4px 10px;
         letter-spacing: 1px;
     }}
+    QLabel[role="update-notice"] {{
+        color: {C.COLOR_BRASS};
+        padding: 0 8px;
+    }}
 
     QToolTip {{
         background: {C.COLOR_BG_RAISED};

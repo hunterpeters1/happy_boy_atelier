@@ -71,6 +71,16 @@ class SettingsDialog(QDialog):
         )
         form.addRow("", self.accents_check)
 
+        self.check_updates_check = QCheckBox("Check for updates on startup")
+        self.check_updates_check.setChecked(settings.check_for_updates_enabled())
+        self.check_updates_check.setToolTip(
+            "One quiet check against this app's GitHub releases when it "
+            "starts — never anything automatic beyond that. A dismissible "
+            "notice appears in the status bar only if a newer version "
+            "actually exists; nothing downloads or installs on its own."
+        )
+        form.addRow("", self.check_updates_check)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
@@ -87,4 +97,5 @@ class SettingsDialog(QDialog):
         settings.set_default_export_dpi(self.dpi_spin.value())
         settings.set_show_rulers_by_default(self.rulers_check.isChecked())
         settings.set_futuristic_accents_enabled(self.accents_check.isChecked())
+        settings.set_check_for_updates_enabled(self.check_updates_check.isChecked())
         self.accept()
