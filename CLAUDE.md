@@ -121,6 +121,10 @@ build-helper directory, deliberately (see above); `Happy Boy Atelier.spec`
 (with spaces, an older/stale spec file this note used to tell you to
 avoid in favor of `HappyBoyAtelier.spec`) has been deleted entirely.
 
+For the full release sequence around this build — version bump, tag,
+publishing to GitHub Releases, and verifying the update check — see
+`RELEASING.md`.
+
 ### Building the Linux binary
 
 A separate spec file, `HappyBoyAtelierLinux.spec` — not a conditional
@@ -462,7 +466,7 @@ cover it); dismissing it stores that version via
 still gets a fresh notice. **Gotcha for release day:** `C.APP_VERSION`
 must be bumped in the same build that ships a new release tag —
 otherwise every user of that build is told their own release is an
-available update.
+available update. `RELEASING.md` has the full checklist.
 
 **Reference library (`app/library.py`, `app/panels/library_panel.py`):**
 a personal, cross-project asset collection stored under
