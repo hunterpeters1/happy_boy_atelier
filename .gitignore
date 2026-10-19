@@ -6,3 +6,7 @@ build/
 dist/
 uploader/photos/
 uploader/trusted_devices.json
+
+# Scratch .atelier saves from manual testing -- never test fixtures
+# (nothing references this folder), and a single save can be many MB.
+savefiles/
