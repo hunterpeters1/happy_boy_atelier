@@ -60,7 +60,7 @@ Same commands, different venv layout (`bin/` instead of `Scripts/`):
 ```
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt          # PySide6
+pip install -r requirements.txt          # PySide6, numpy, qrcode, pypng
 pip install -r requirements-dev.txt      # pytest
 python main.py                           # run the app
 pytest                                   # full test suite
@@ -403,8 +403,10 @@ keys (not the JSON-blob pattern presets/templates need) — autosave
 interval (`AUTOSAVE_OFF_MS = 0` is a sentinel for "off," never handed to
 `QTimer.setInterval()` directly, since a real 0ms interval fires
 continuously), default New Painting unit, default export DPI, whether
-new windows show rulers by default — plus a fifth, `futuristic_accents_enabled()`
-(default on), covered below. **None of this is project state**: nothing
+new windows show rulers by default — plus `futuristic_accents_enabled()`
+(default on) and `check_for_updates_enabled()` (default on) with its
+companion `last_dismissed_update_version()`, each covered below.
+**None of this is project state**: nothing
 here is saved into any `.atelier` file, none of it is undoable, and none
 of it retroactively touches an already-open project or already-built
 dialog — each preference only seeds a *default* the next time it's
@@ -418,9 +420,12 @@ since it drives an already-running `QTimer` on the one persistent
 default on):** a small, additive motion/glow layer, not a re-skin — the
 hairline-stroke, no-gradient, no-drop-shadow visual language stays
 intact, and every accent has a plain/instant fallback when the setting
-is off. Covers: a breathing glow-pulse on whichever placement tool is
-currently armed in the Project Panel (`layers_panel.py`,
-`_start_tool_glow()`); a fade-in for the resize/rotate handle frame on
+is off. Covers: a slow (3-second period) breathing glow-pulse on
+whichever placement tool is currently armed — `start_tool_glow()` in
+`app/panels/tool_glow.py`, shared by the Project Panel's tool buttons
+and the Swatches dock's eyedropper button, with each panel owning the
+settings-flag gating and its own bookkeeping of which button holds the
+glow; a fade-in for the resize/rotate handle frame on
 selection (`handle_frame.py`, `HandleFrame.set_active()` — deliberately
 one-directional, deactivating still snaps instantly, since a lingering
 fade-out right after deselect reads as unresponsive); a fade-in for docks
@@ -437,6 +442,27 @@ enclosing function returns, silently vanishing off the widget despite
 Qt's documented ownership transfer — always construct these with the
 target widget as parent (`QGraphicsDropShadowEffect(btn)`, not
 `QGraphicsDropShadowEffect()` then `btn.setGraphicsEffect(...)`).
+
+**Update check (`app/update_check.py`, `MainWindow.check_for_updates_on_startup()`,
+gated by `settings.check_for_updates_enabled()`, default on):** a quiet,
+dismissible "a newer version exists" notice, not an updater — nothing
+ever downloads or installs. `UpdateChecker` makes one GET to
+`https://api.github.com/repos/{C.GITHUB_REPO}/releases/latest` (8-second
+timeout) and emits `update_available(version, release_url)` only when
+the release tag is strictly greater than `C.APP_VERSION`. Every failure
+path is silent by design — no network, GitHub down, no releases
+published yet (a 404), malformed JSON, or a tag that isn't plain
+dot-separated integers (`1.2.0-beta` is ignored rather than guessed at).
+It is called from `main.py`'s real entry point, **not** from
+`MainWindow.__init__`, because the test suite constructs many
+`MainWindow`s directly and none of those may ever touch the network.
+The notice is a permanent status-bar label (so a `showMessage()` can't
+cover it); dismissing it stores that version via
+`settings.set_last_dismissed_update_version()`, so a *newer* release
+still gets a fresh notice. **Gotcha for release day:** `C.APP_VERSION`
+must be bumped in the same build that ships a new release tag —
+otherwise every user of that build is told their own release is an
+available update.
 
 **Reference library (`app/library.py`, `app/panels/library_panel.py`):**
 a personal, cross-project asset collection stored under
@@ -478,6 +504,35 @@ PIN/session model: a SHA-256-hashed token in `uploader/trusted_devices.json`
 (gitignored, per-artist local store) that lets a phone skip the PIN
 screen on future visits; `/forget-device` revokes just that one device.
 
+**Port-in-use recovery (`PhoneUploadDialog._attempt_stale_server_recovery()`,
+`uploader/app.py`'s `/internal/shutdown`):** when the upload server fails
+to start — typically because a leftover copy of this same tool still
+holds port 5000 — the dialog makes exactly one automatic recovery
+attempt (`_recovery_attempted`): a POST to
+`http://127.0.0.1:5000/internal/shutdown`, then a relaunch after a short
+delay for the OS to free the socket. That route is deliberately
+unauthenticated (a new instance can't know an old one's PIN) but
+returns 403 to any non-loopback caller, so a phone on the LAN can't
+reach it even by guessing the URL; it only succeeds against a genuine
+previous copy answering `{"ok": true}`. A refusal, a timeout, or a reply
+from anything else falls straight through to the original failure
+message, so an unrelated app on that port is never touched. Don't add
+auth to it or widen it beyond loopback.
+
+**Reference image cap (`C.MAX_REFERENCE_IMAGES = 15`, enforced in
+`MainWindow._import_image_paths()` only):** that method is the single
+choke point for the Import dialog, OS drag-and-drop, and the Library
+panel's drag-in, so the cap lives there and nowhere else. A batch that
+won't fit is refused whole rather than silently truncated. It is
+deliberately **not** checked inside `ReferenceLayerGroup`: undo/redo and
+`.atelier` loading go through `add_existing()`/`load_from_dict()`
+directly, so an older project that already has more than 15 still opens
+and edits normally. The phone uploader's web page carries its own
+matching `MAX_BATCH_SIZE = 15` (`uploader/templates/index.html`) — a
+separate constant, since `uploader/` never imports from the app, so keep
+the two in step by hand. The Reference Library itself is uncapped; only
+placing onto a canvas is.
+
 **Project templates (`app/project_templates.py`):** a named
 `{width, height, unit, guides}` starting point for New Painting —
 explicitly never reference images or composition/lighting content, since
@@ -491,8 +546,12 @@ JSON-string-in-`QSettings` storage pattern as export presets
 (`export_dialog.py`).
 
 **Swatches / Eyedropper (`app/panels/swatches_panel.py`):** the
-eyedropper tool (Project Panel, Reference section) hovers a reference
-image to read a live color (hex/RGB/relative-luminance "value" %) into
+eyedropper tool's activation button lives in the Swatches dock itself,
+not the Project Panel with every other tool button — it's the one tool
+whose whole point is the output shown right below it, so trigger and
+destination share a dock. It still arms the same
+`scene.set_active_tool("eyedropper")` the Project Panel's buttons use.
+With it armed, hovering a reference image reads a live color (hex/RGB/relative-luminance "value" %) into
 the Swatches dock continuously (`scene.color_hovered`), and clicking
 pins it into a per-project list (`scene.color_sampled` →
 `ProjectMeta.color_swatches`) — per-project, not shared across projects,
@@ -570,7 +629,9 @@ yet:
    (Phase 4, pulled forward from `V2_ROADMAP.md`'s deferred list); then
    post-launch refinement — Focus Mode's transparent desk, live phone
    upload → library sync with an in-app launcher, the Options/Settings
-   menu, and Futuristic UI accents.
+   menu, Futuristic UI accents, a 15-image reference cap, self-service
+   recovery when the uploader's port is already in use, a quiet
+   startup update check, and Linux build support.
 
 See `CHANGELOG.md` for the itemized history and `V2_ROADMAP.md`
 (particularly its Section 7, added after the fact) for status against
