@@ -6,10 +6,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPen
-from PySide6.QtWidgets import QGraphicsView, QMenu
+from PySide6.QtWidgets import QGraphicsView
 
 from .. import constants as C
-from .. import icons
+from .. import radial_menu as radial_mod
 
 ZOOM_STEP = 1.15
 MIN_ZOOM = 0.05
@@ -177,60 +177,49 @@ class CanvasView(QGraphicsView):
             super().dropEvent(event)
 
     # -- context menu -------------------------------------------------------
-    def _build_context_menu(self, scene_pos: QPointF) -> QMenu | None:
-        """Construct (but don't show) the right-click menu for a scene
-        position — split out from contextMenuEvent so the menu's contents
-        can be tested without ever calling the blocking QMenu.exec().
-        """
+    def _build_radial_items(self, scene_pos: QPointF) -> list[tuple[str, str, object]] | None:
+        """Build the list of (icon_name, label, callback) for the radial menu
+        at a given scene position. Returns None if no menu should appear."""
         scene = self.scene()
         if scene is None or not hasattr(scene, "interactive_item_at"):
             return None
         item = scene.interactive_item_at(scene_pos, self.transform())
-        menu = QMenu(self)
+        items: list[tuple[str, str, object]] = []
+
         if item is not None:
             if hasattr(scene, "set_selection"):
                 scene.set_selection([item])
             locked = item.is_locked() if hasattr(item, "is_locked") else False
             if hasattr(scene, "delete_selected_items"):
-                delete_action = menu.addAction(icons.icon("delete"), "Delete")
-                delete_action.setEnabled(not locked)
-                delete_action.triggered.connect(scene.delete_selected_items)
+                items.append(("delete", "Delete", scene.delete_selected_items))
             if hasattr(item, "set_locked"):
-                lock_action = menu.addAction(
-                    icons.icon("unlock" if locked else "lock"), "Unlock" if locked else "Lock"
-                )
-                lock_action.triggered.connect(lambda: item.set_locked(not locked))
-            # Crop is direct manipulation via edge handles on the canvas —
-            # no context menu entry needed (the artist just grabs an edge
-            # handle when the image has a crop applied).
-            # -- PureRef-inspired quick transforms (reference images only) --
+                items.append(("lock" if locked else "unlock",
+                    "Unlock" if locked else "Lock",
+                    lambda: item.set_locked(not locked)))
             if hasattr(item, "flip_horizontal"):
-                menu.addSeparator()
-                flip_h_action = menu.addAction("Flip Horizontal")
-                flip_h_action.triggered.connect(item.flip_horizontal)
-                flip_v_action = menu.addAction("Flip Vertical")
-                flip_v_action.triggered.connect(item.flip_vertical)
-                menu.addSeparator()
-                magnify_action = menu.addAction("Magnify 2×")
-                magnify_action.triggered.connect(item.magnify)
-                demag_action = menu.addAction("Shrink to 50%")
-                demag_action.triggered.connect(item.demagnify)
+                items.append(("flip_h", "Flip H", item.flip_horizontal))
+                items.append(("flip_v", "Flip V", item.flip_vertical))
+                items.append(("magnify", "Magnify 2×", item.magnify))
+                items.append(("shrink", "Shrink 50%", item.demagnify))
         else:
-            fit_action = menu.addAction(icons.icon("fit"), "Fit Canvas")
-            fit_action.triggered.connect(lambda: self.fit_canvas(scene.canvas_rect()))
+            items.append(("fit", "Fit Canvas", lambda: self.fit_canvas(scene.canvas_rect())))
             if hasattr(scene, "active_tool") and scene.active_tool():
-                menu.addSeparator()
-                cancel_action = menu.addAction("Cancel Tool (Esc)")
-                cancel_action.triggered.connect(lambda: scene.set_active_tool(None))
-        return menu
+                items.append(("delete", "Cancel Tool", lambda: scene.set_active_tool(None)))
+
+        return items if items else None
 
     def contextMenuEvent(self, event):
-        menu = self._build_context_menu(self.mapToScene(event.pos()))
-        if menu is None:
+        """Show a radial (pie) menu instead of a linear context menu."""
+        from PySide6.QtCore import QPoint
+        scene_pos = self.mapToScene(event.pos())
+        items = self._build_radial_items(scene_pos)
+        if items is None:
             super().contextMenuEvent(event)
             return
-        if not menu.isEmpty():
-            menu.exec(event.globalPos())
+        menu = radial_mod.show_radial_menu(
+            items, event.globalPos(), self
+        )
+        menu.action_triggered.connect(lambda action: action() if callable(action) else None)
 
     # -- theme -------------------------------------------------------------
     def refresh_theme_colors(self) -> None:

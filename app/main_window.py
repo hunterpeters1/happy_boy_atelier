@@ -1,5 +1,11 @@
-"""MainWindow: menus, toolbar, docks, and the top-level project lifecycle
-(new / open / save / import / export / lock)."""
+"""MainWindow: the project lifecycle (new/open/save/import/export/lock)
+and the floating, chrome-free UI surface (top bar, tool strip, floating
+panels, command overlay, radial menu).
+
+The menu bar, toolbar, and status bar are gone — replaced by hover-revealed
+floating overlays and a command palette accessible via Ctrl+K. The three dock
+panels (Project, Properties, Swatches) are now borderless floating cards
+that snap to canvas edges."""
 
 from __future__ import annotations
 
@@ -10,12 +16,12 @@ from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
-    QDockWidget,
     QFileDialog,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
-    QToolBar,
+    QWidget,
 )
 
 from . import constants as C
@@ -23,6 +29,9 @@ from . import debug_tools
 from . import icons
 from . import recovery
 from . import themes
+from . import ui_chrome
+from . import radial_menu as radial_mod
+from .command_overlay import CommandOverlay
 from .hacker_status import HackerStatusWidget
 from .theme import apply_theme
 from .atelier_io import (
@@ -38,7 +47,6 @@ from .atelier_io import (
 from .canvas.canvas_scene import CanvasScene
 from .canvas.canvas_view import CanvasView
 from .canvas.undo_commands import AddItemCommand
-from .dialogs.command_palette import CommandPalette
 from .dialogs.export_dialog import ExportDialog
 from .dialogs.new_project_dialog import NewProjectDialog
 from .dialogs.start_screen import StartScreen
@@ -55,38 +63,47 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(C.APP_NAME)
         self.resize(1440, 920)
+        # No menu bar, no toolbar, no status bar — just the canvas with
+        # floating, hover-revealed chrome on top of it.
 
         self.current_path: Path | None = None
         self.meta = ProjectMeta()
 
         self.scene: CanvasScene | None = None
         self.view: CanvasView | None = None
-        self.layers_dock: QDockWidget | None = None
-        self.properties_dock: QDockWidget | None = None
-        self.swatches_dock: QDockWidget | None = None
 
-        # Appearance (see themes.py) — caller (main.py) already applied
-        # this mode's palette to constants.py and ran apply_theme() before
-        # constructing us, so our own widgets are built with the right
-        # colors from the start; this just tracks what's active so the
-        # Appearance menu shows the right radio checked and so hack-mode
-        # extras (Debug menu, hacker status widget) can be set up if we're
-        # starting directly in Hack Mode.
-        self._theme_mode = theme_mode
+        # Floating chrome elements
+        self._top_bar: ui_chrome.TopBar | None = None
+        self._tool_strip: ui_chrome.ToolStrip | None = None
+        self._bottom_bar: ui_chrome.BottomStatusBar | None = None
+        self._command_overlay: CommandOverlay | None = None
+
+        # Floating panels (replaces QDockWidget)
+        self._project_panel: ui_chrome.FloatingPanel | None = None
+        self._properties_panel: ui_chrome.FloatingPanel | None = None
+        self._swatches_panel: ui_chrome.FloatingPanel | None = None
+
+        # Store the inner widget panels (LayersPanel, PropertiesPanel, SwatchesPanel)
+        # so they survive panel hide/show
+        self._layers_panel_inner: LayersPanel | None = None
+        self._properties_inner: PropertiesPanel | None = None
+        self._swatches_inner: SwatchesPanel | None = None
+
         self._debug_menu = None
         self._hacker_widget: HackerStatusWidget | None = None
         self._stats_label: QLabel | None = None
         self._stats_timer: QTimer | None = None
 
-        self.status_hint = QLabel("")
-        self.status_lock_banner = QLabel("SETUP LOCKED")
-        self.status_lock_banner.setProperty("role", "banner-locked")
-        self.status_lock_banner.setVisible(False)
-        self.statusBar().addPermanentWidget(self.status_lock_banner)
-        self.statusBar().addWidget(self.status_hint)
-
-        self._build_menu_and_toolbar()
+        # Appearance theme tracking
+        self._theme_mode = theme_mode
         self._set_hack_mode_active(self._theme_mode == themes.ThemeMode.HACK)
+
+        # Build all the QAction objects up front (even though we no longer
+        # have a menu bar, the actions are used by the command overlay,
+        # toolbar strip, keyboard shortcuts, and the radial menu).
+        self._build_actions()
+        self._build_floating_chrome()
+
         self._start_project_or_offer_recovery()
 
         # Phase 0.3: periodic crash-recovery snapshot. Independent of the
@@ -150,10 +167,12 @@ class MainWindow(QMainWindow):
             # last-clean-save state, so leave the undo stack dirty.
             self.current_path = None
             self._rebuild_workspace(scene)
-            self.layers_panel.refresh_structure()
+            if self._layers_panel_inner is not None:
+                self._layers_panel_inner.refresh_structure()
             self.lock_action.setChecked(self.meta.locked)
             self._update_lock_banner()
-            self.statusBar().showMessage("Recovered your last unsaved session — Save to keep it.", 6000)
+            if self._bottom_bar is not None:
+                self._bottom_bar.set_hint("Recovered your last unsaved session — Save to keep it.")
             # Deliberately NOT deleting the recovery file here. It used to
             # be removed the instant either button was clicked — meaning a
             # second crash before the artist's first post-recovery Save
@@ -199,7 +218,7 @@ class MainWindow(QMainWindow):
         self.view.files_dropped.connect(self._import_image_paths)
         scene.tool_finished.connect(self._on_tool_finished)
 
-        # Undo/redo menu wiring — each new/opened project gets its own
+        # Undo/redo action wiring — each new/opened project gets its own
         # QUndoStack, so these connections are (re)made per scene rather
         # than once at startup.
         self.undo_action.setEnabled(scene.undo_stack.canUndo())
@@ -214,55 +233,39 @@ class MainWindow(QMainWindow):
         )
         scene.undo_stack.indexChanged.connect(self._on_undo_index_changed)
 
-        if self.layers_dock is not None:
-            self.removeDockWidget(self.layers_dock)
-        if self.properties_dock is not None:
-            self.removeDockWidget(self.properties_dock)
-        if self.swatches_dock is not None:
-            self.removeDockWidget(self.swatches_dock)
+        # Remove old dock widgets if they exist (from a previous scene)
+        for dock_attr in ("layers_dock", "properties_dock", "swatches_dock"):
+            dock = getattr(self, dock_attr, None)
+            if dock is not None:
+                self.removeDockWidget(dock)
+                dock.deleteLater()
+                setattr(self, dock_attr, None)
 
-        self.layers_panel = LayersPanel(scene, self)
-        self.layers_panel.request_import.connect(self.import_images)
-        # Tree-selection <-> canvas-selection is two-way: clicking a row
-        # drives scene.set_selection() (inside the panel itself), and this
-        # is the other direction — a canvas click highlights the matching
-        # row without tearing down and rebuilding the whole tree.
-        scene.selection_changed.connect(self.layers_panel._sync_selection_highlight)
-        self.layers_dock = QDockWidget("Project", self)
-        self.layers_dock.setWidget(self.layers_panel)
-        self.layers_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self.layers_dock)
+        # Create inner panel widgets (the actual content)
+        self._layers_panel_inner = LayersPanel(scene, self)
+        self._layers_panel_inner.request_import.connect(self.import_images)
+        scene.selection_changed.connect(self._layers_panel_inner._sync_selection_highlight)
 
-        self.properties_panel = PropertiesPanel(scene, self)
-        self.properties_panel.request_delete.connect(self._delete_selected)
-        self.properties_dock = QDockWidget("Properties", self)
-        self.properties_dock.setWidget(self.properties_panel)
-        self.properties_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
+        self._properties_inner = PropertiesPanel(scene, self)
+        self._properties_inner.request_delete.connect(self._delete_selected)
 
         # Eyedropper output — per-project swatch list (see meta.color_swatches),
         # rebuilt alongside Properties so a fresh self.meta (just assigned by
         # the new-project/open-project caller above) is what it reads from.
         # SwatchesPanel wires scene.color_hovered/color_sampled to itself
         # in its own __init__ — nothing further to connect here.
-        self.swatches_panel = SwatchesPanel(scene, self.meta, self)
-        self.swatches_dock = QDockWidget("Swatches", self)
-        self.swatches_dock.setWidget(self.swatches_panel)
-        self.swatches_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.swatches_dock)
-        self.tabifyDockWidget(self.properties_dock, self.swatches_dock)
+        self._swatches_inner = SwatchesPanel(scene, self.meta, self)
 
-        # The Inspector has exactly one source of truth: CanvasScene's own
-        # selection_changed signal (see canvas_scene.py — Qt's native
-        # selectionChanged/selectedItems() don't work for these items at
-        # all, not just unreliably). Previously the Inspector was *also*
-        # wired to item_activated via a show_item() method that forced
-        # single-item display even when several items were Shift-selected
-        # — that's what let the Inspector and the actual selection
-        # disagree with each other on screen. item_activated now drives
-        # only the resize/rotate handle frame (_on_item_activated, in
-        # canvas_scene.py), a separate concern.
-        scene.selection_changed.connect(self.properties_panel.refresh)
+        # Wire the inner panels into the floating cards
+        if self._project_panel is not None:
+            self._project_panel.set_content_widget(self._layers_panel_inner)
+        if self._properties_panel is not None:
+            self._properties_panel.set_content_widget(self._properties_inner)
+        if self._swatches_panel is not None:
+            self._swatches_panel.set_content_widget(self._swatches_inner)
+
+        # Inspector is driven by CanvasScene's selection_changed signal
+        scene.selection_changed.connect(self._properties_inner.refresh)
 
         self._update_window_title()
         self._update_status_hint()
@@ -273,8 +276,19 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, _fit)
 
+        # Now that the view exists, install hover tracking for chrome auto-show
+        self._install_canvas_hover_tracking()
+        # Show floating panels now that they have content
+        if self._project_panel is not None:
+            self._project_panel.fade_in()
+        if self._properties_panel is not None:
+            self._properties_panel.fade_in()
+        if self._swatches_panel is not None:
+            self._swatches_panel.fade_in()
+
     def _on_tool_finished(self) -> None:
-        self.layers_panel._sync_tool_buttons(None)
+        if self._layers_panel_inner is not None:
+            self._layers_panel_inner._sync_tool_buttons(None)
         self._update_status_hint()
 
     def _on_undo_index_changed(self, _index: int) -> None:
@@ -288,17 +302,20 @@ class MainWindow(QMainWindow):
         if debug_tools.VERBOSE_LOGGING:
             cmd_text = self.scene.undo_stack.command(_index - 1).text() if _index > 0 else "clean"
             debug_tools.log(f"undo_stack.index -> {_index} ({cmd_text})")
-        self.properties_panel.refresh()
-        self.layers_panel.refresh_structure()
+        if self._properties_inner is not None:
+            self._properties_inner.refresh()
+        if self._layers_panel_inner is not None:
+            self._layers_panel_inner.refresh_structure()
 
     def _update_status_hint(self) -> None:
-        if self.scene is None:
+        if self.scene is None or self._bottom_bar is None:
             return
         spec = self.scene.canvas_spec
         zoom = self.view.current_zoom() if self.view else 1.0
-        self.status_hint.setText(
+        self._bottom_bar.set_hint(
             f"  {spec.name}  ·  {spec.width:g} x {spec.height:g} {spec.unit}  ·  {int(zoom * 100)}%"
         )
+        self._bottom_bar.set_zoom(int(zoom * 100))
 
     def _on_zoom_changed(self, _zoom: float) -> None:
         self._update_status_hint()
@@ -307,78 +324,58 @@ class MainWindow(QMainWindow):
         name = self.current_path.stem if self.current_path else (self.scene.canvas_spec.name if self.scene else "Untitled")
         self.setWindowTitle(f"{C.APP_NAME} — {name}")
 
-    # -- menu / toolbar -----------------------------------------------------
-    def _build_menu_and_toolbar(self) -> None:
-        menu = self.menuBar()
+    # -- actions (replacing menu + toolbar) ----------------------------------
+    def _build_actions(self) -> None:
+        """Build all QAction objects once. These are shared between the
+        command overlay (Ctrl+K / ⋯ button), the floating tool strip,
+        keyboard shortcuts, and the radial menu — unlike the old design
+        where the toolbar built separate, un-synced QAction instances.
+        There is exactly one object per action now."""
 
-        file_menu = menu.addMenu("&File")
-        self.new_action = self._add_action(file_menu, "New Painting…", "Ctrl+N", self.new_project_dialog, icon_name="new")
-        self.open_action = self._add_action(file_menu, "Open…", "Ctrl+O", self.open_project, icon_name="open")
-        self.recent_menu = file_menu.addMenu("Open Recent")
-        self.recent_menu.aboutToShow.connect(self._populate_recent_menu)
-        self.save_action = self._add_action(file_menu, "Save", "Ctrl+S", self.save_project, icon_name="save")
-        self._add_action(file_menu, "Save As…", "Ctrl+Shift+S", lambda: self.save_project(force_dialog=True))
-        file_menu.addSeparator()
-        self.import_action = self._add_action(
-            file_menu, "Import Reference Image(s)…", "Ctrl+I", self.import_images, icon_name="import"
-        )
-        self.export_action = self._add_action(file_menu, "Export…", "Ctrl+E", self.export_project, icon_name="export")
-        file_menu.addSeparator()
-        self._add_action(file_menu, "Exit", "Ctrl+Q", self.close)
+        # File actions
+        self.new_action = self._add_action("New Painting…", "Ctrl+N", self.new_project_dialog, icon_name="new")
+        self.open_action = self._add_action("Open…", "Ctrl+O", self.open_project, icon_name="open")
+        self.save_action = self._add_action("Save", "Ctrl+S", self.save_project, icon_name="save")
+        self.save_as_action = self._add_action("Save As…", "Ctrl+Shift+S", lambda: self.save_project(force_dialog=True))
+        self.import_action = self._add_action("Import Reference Image(s)…", "Ctrl+I", self.import_images, icon_name="import")
+        self.export_action = self._add_action("Export…", "Ctrl+E", self.export_project, icon_name="export")
+        self.exit_action = self._add_action("Exit", "Ctrl+Q", self.close)
 
-        edit_menu = menu.addMenu("&Edit")
+        # Edit actions
         self.undo_action = QAction(icons.icon("undo"), "Undo", self)
         self.undo_action.setShortcut(QKeySequence.Undo)
         self.undo_action.setEnabled(False)
         self.undo_action.triggered.connect(lambda: self.scene.undo_stack.undo() if self.scene else None)
         self._set_tooltip(self.undo_action)
         icons.register(self.undo_action, lambda obj, ic: obj.setIcon(ic), "undo")
-        edit_menu.addAction(self.undo_action)
+
         self.redo_action = QAction(icons.icon("redo"), "Redo", self)
         self.redo_action.setShortcut(QKeySequence.Redo)
         self.redo_action.setEnabled(False)
         self.redo_action.triggered.connect(lambda: self.scene.undo_stack.redo() if self.scene else None)
         self._set_tooltip(self.redo_action)
         icons.register(self.redo_action, lambda obj, ic: obj.setIcon(ic), "redo")
-        edit_menu.addAction(self.redo_action)
-        edit_menu.addSeparator()
-        self._add_action(edit_menu, "Delete Selected", "Del", self._delete_selected, icon_name="delete")
-        self._add_action(edit_menu, "Duplicate", "Ctrl+D", self._duplicate_selected, icon_name="image")
-        self._add_action(edit_menu, "Bring to Front", None, self._bring_to_front)
-        self._add_action(edit_menu, "Send to Back", None, self._send_to_back)
-        edit_menu.addSeparator()
-        self._add_action(edit_menu, "Flip Horizontal", None, self._flip_horizontal)
-        self._add_action(edit_menu, "Flip Vertical", None, self._flip_vertical)
-        self._add_action(edit_menu, "Magnify 2×", None, self._magnify_selected)
-        self._add_action(edit_menu, "Shrink to 50%", None, self._demagnify_selected)
-        edit_menu.addSeparator()
-        self.lock_action = self._add_action(
-            edit_menu, "Lock Setup", "Ctrl+L", self.toggle_lock_setup, checkable=True, icon_name="lock"
-        )
 
-        view_menu = menu.addMenu("&View")
-        self._add_action(view_menu, "Zoom In", "Ctrl+=", lambda: self.view.zoom_in())
-        self._add_action(view_menu, "Zoom Out", "Ctrl+-", lambda: self.view.zoom_out())
-        self.fit_action = self._add_action(
-            view_menu, "Fit Canvas", "Ctrl+0", lambda: self.view.fit_canvas(self.scene.canvas_rect()), icon_name="fit"
-        )
-        view_menu.addSeparator()
-        # set_ruler_visible() has existed on CanvasView since Phase 0 with
-        # no menu item, toolbar button, or shortcut ever wired to it — a
-        # dead feature nobody could discover. This is that wiring.
-        self.ruler_action = self._add_action(
-            view_menu, "Show Rulers", "Ctrl+R",
+        self.delete_action = self._add_action("Delete Selected", "Del", self._delete_selected, icon_name="delete")
+        self.duplicate_action = self._add_action("Duplicate", "Ctrl+D", self._duplicate_selected, icon_name="image")
+        self.bring_to_front_action = self._add_action("Bring to Front", None, self._bring_to_front)
+        self.send_to_back_action = self._add_action("Send to Back", None, self._send_to_back)
+        self.flip_h_action = self._add_action("Flip Horizontal", None, self._flip_horizontal)
+        self.flip_v_action = self._add_action("Flip Vertical", None, self._flip_vertical)
+        self.magnify_action = self._add_action("Magnify 2×", None, self._magnify_selected)
+        self.shrink_action = self._add_action("Shrink to 50%", None, self._demagnify_selected)
+        self.lock_action = self._add_action("Lock Setup", "Ctrl+L", self.toggle_lock_setup, checkable=True, icon_name="lock")
+
+        # View actions
+        self.fit_action = self._add_action("Fit Canvas", "Ctrl+0", lambda: self.view.fit_canvas(self.scene.canvas_rect()), icon_name="fit")
+        self.ruler_action = self._add_action("Show Rulers", "Ctrl+R",
             lambda checked: self.view.set_ruler_visible(checked) if self.view else None,
-            checkable=True,
-        )
+            checkable=True)
         self.ruler_action.setChecked(True)
-        view_menu.addSeparator()
-        self._add_action(view_menu, "Change Desk Color…", None, self._change_desk_color, icon_name="eye")
-        self.palette_action = self._add_action(
-            view_menu, "Command Palette…", "Ctrl+K", self.open_command_palette
-        )
-        view_menu.addSeparator()
-        appearance_menu = view_menu.addMenu("Appearance")
+        self.desk_color_action = self._add_action("Change Desk Color…", None, self._change_desk_color, icon_name="eye")
+        self.palette_action = self._add_action("Command Palette…", "Ctrl+K", self.open_command_palette)
+
+        # Theme actions
         self._theme_actions: dict[themes.ThemeMode, QAction] = {}
         theme_group = QActionGroup(self)
         theme_group.setExclusive(True)
@@ -389,36 +386,129 @@ class MainWindow(QMainWindow):
             action.setChecked(mode == self._theme_mode)
             action.triggered.connect(lambda _checked, m=mode: self._set_theme(m))
             theme_group.addAction(action)
-            appearance_menu.addAction(action)
             self._theme_actions[mode] = action
 
-        help_menu = menu.addMenu("&Help")
-        self._add_action(help_menu, "About Happy Boy Atelier", None, self._show_about)
+        self.help_action = self._add_action("About Happy Boy Atelier", None, self._show_about)
 
-        # One QAction per action, shared verbatim by menu and toolbar — a
-        # QAction built for the toolbar alone (the old toolbar.addAction(
-        # text, slot) pattern) can't carry the menu's shortcut into its own
-        # tooltip and the two copies can silently drift out of sync. There
-        # is exactly one object per action now, so that's structurally
-        # impossible.
-        toolbar = QToolBar("Main")
-        toolbar.setMovable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        toolbar.setIconSize(QSize(22, 22))
-        self.addToolBar(toolbar)
-        toolbar.addAction(self.new_action)
-        toolbar.addAction(self.open_action)
-        toolbar.addAction(self.save_action)
-        toolbar.addSeparator()
-        toolbar.addAction(self.undo_action)
-        toolbar.addAction(self.redo_action)
-        toolbar.addSeparator()
-        toolbar.addAction(self.import_action)
-        toolbar.addAction(self.export_action)
-        toolbar.addSeparator()
-        toolbar.addAction(self.fit_action)
-        toolbar.addSeparator()
-        toolbar.addAction(self.lock_action)
+        # Register all actions on the window so keyboard shortcuts work
+        # without a menu bar — QMainWindow picks up shortcuts from actions
+        # added via addAction().
+        for attr_name in self._ALL_ACTIONS:
+            action = getattr(self, attr_name, None)
+            if action is not None:
+                self.addAction(action)
+        for action in self._theme_actions.values():
+            self.addAction(action)
+
+    def _build_floating_chrome(self) -> None:
+        """Build the floating, chrome-free UI surface: top bar, tool strip,
+        bottom status bar, and the three floating panels."""
+
+        # -- Top bar (floating, at the top of the window) --
+        self._top_bar = ui_chrome.TopBar(self)
+        self._top_bar.hide()  # shown on hover
+        self._top_bar.menu_requested.connect(self.open_command_palette)
+        self._top_bar.lock_button.toggled.connect(self.toggle_lock_setup)
+        self._top_bar.lock_button.setChecked(False)
+
+        # Theme picker menu for the top bar
+        theme_menu = QMenu(self)
+        for mode, action in self._theme_actions.items():
+            theme_menu.addAction(action)
+        self._top_bar.theme_button.setMenu(theme_menu)
+
+        # -- Tool strip (floating, left canvas edge, hover-revealed) --
+        self._tool_strip = ui_chrome.ToolStrip(self)
+        self._tool_strip.hide()
+        # Wire the tool strip buttons to actions
+        self._tool_strip.set_buttons([
+            ("new", "New Painting", self.new_project_dialog),
+            ("open", "Open", self.open_project),
+            ("save", "Save", self.save_project),
+            ("undo", "Undo", lambda: self.scene.undo_stack.undo() if self.scene else None),
+            ("redo", "Redo", lambda: self.scene.undo_stack.redo() if self.scene else None),
+            ("import", "Import", self.import_images),
+            ("export", "Export", self.export_project),
+            ("fit", "Fit Canvas", lambda: self.view.fit_canvas(self.scene.canvas_rect()) if self.view and self.scene else None),
+            ("lock", "Lock Setup", self.toggle_lock_setup),
+            ("eye", "Desk Color", self._change_desk_color),
+        ])
+
+        # -- Bottom status bar (floating, bottom canvas edge, hover-revealed) --
+        self._bottom_bar = ui_chrome.BottomStatusBar(self)
+        self._bottom_bar.hide()
+
+        # -- Floating panels --
+        # Project panel (left side)
+        self._recent_menu = QMenu(self)
+        self._populate_recent_menu()
+        self._project_panel = self._create_floating_panel("Project", ui_chrome.FloatingPanel, side="left")
+
+        # Properties panel (right side)
+        self._properties_panel = self._create_floating_panel("Properties", ui_chrome.FloatingPanel, side="right")
+
+        # Swatches panel (right side, below properties)
+        self._swatches_panel = self._create_floating_panel("Swatches", ui_chrome.FloatingPanel, side="right")
+
+        # Install canvas hover tracking for auto-hiding chrome
+        self._install_canvas_hover_tracking()
+
+    def _create_floating_panel(self, title: str, panel_cls, side: str = "left") -> ui_chrome.FloatingPanel:
+        """Create a FloatingPanel with standard brass styling and position it
+        along the specified canvas edge."""
+        panel = panel_cls(title, self)
+        panel.setFixedWidth(328)  # Standard panel width
+        # Position near the edge
+        if side == "left":
+            panel.move(16, 56)  # Below the top bar
+        else:
+            panel.move(self.width() - 328 - 16, 56)
+        return panel
+
+    def _install_canvas_hover_tracking(self) -> None:
+        """Install an event filter on the canvas view's viewport to show/hide
+        floating chrome based on mouse proximity to canvas edges."""
+        if self.view is not None:
+            self.view.viewport().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        """Handle mouse move events on the canvas viewport for chrome auto-show."""
+        from PySide6.QtCore import QEvent, QTimer
+
+        if obj is self.view and obj is not None:
+            if event.type() == QEvent.MouseMove:
+                pos = event.position().toQPoint()
+                margin = 24  # hover margin
+
+                # Show top bar near the top edge
+                if self._top_bar is not None:
+                    if pos.y() < margin:
+                        if not self._top_bar.isVisible():
+                            self._top_bar.fade_in()
+                    elif pos.y() > margin * 2 and self._top_bar.isVisible():
+                        self._top_bar.fade_out()
+
+                    # Auto-hide after delay
+                    if self._top_bar.is_actually_visible():
+                        QTimer.singleShot(2000, self._top_bar.fade_out)
+
+                # Show tool strip near the left edge
+                if self._tool_strip is not None:
+                    if pos.x() < margin:
+                        if not self._tool_strip.isVisible():
+                            self._tool_strip.fade_in()
+                    elif pos.x() > margin * 2 and self._tool_strip.isVisible():
+                        self._tool_strip.fade_out()
+
+                # Show bottom bar near the bottom edge
+                if self._bottom_bar is not None:
+                    if obj.height() - pos.y() < margin:
+                        if not self._bottom_bar.isVisible():
+                            self._bottom_bar.fade_in()
+                    elif obj.height() - pos.y() > margin * 2 and self._bottom_bar.isVisible():
+                        self._bottom_bar.fade_out()
+
+        return super().eventFilter(obj, event)
 
     # -- appearance -----------------------------------------------------
     def _change_desk_color(self) -> None:
@@ -450,7 +540,8 @@ class MainWindow(QMainWindow):
         if self.view is not None:
             self.view.refresh_theme_colors()
         debug_tools.log(f"theme changed -> {mode.value}")
-        self.statusBar().showMessage("Theme changed.", 4000)
+        if self._bottom_bar is not None:
+            self._bottom_bar.set_hint("Theme changed.")
 
     def _refresh_icon_colors(self) -> None:
         """Re-bake every menu/toolbar/Properties-panel icon with the
@@ -461,7 +552,7 @@ class MainWindow(QMainWindow):
         that already re-renders every icon it contains.
         """
         icons.refresh_all()
-        layers_panel = getattr(self, "layers_panel", None)
+        layers_panel = getattr(self, "_layers_panel_inner", None)
         if layers_panel is not None:
             layers_panel.refresh_structure()
 
@@ -475,28 +566,39 @@ class MainWindow(QMainWindow):
         active.
         """
         if active and self._debug_menu is None:
-            self._debug_menu = self.menuBar().addMenu("&Debug")
-            self.verbose_log_action = self._add_action(
-                self._debug_menu, "Verbose Console Logging", None,
+            # Build debug menu as a popup menu attached to the top bar's ⋯ button area
+            self._debug_menu = QMenu(self)
+            self.verbose_log_action = self._add_action_obj(
+                "Verbose Console Logging", None,
                 self._toggle_verbose_logging, checkable=True,
             )
-            self.stats_overlay_action = self._add_action(
-                self._debug_menu, "Scene Stats in Status Bar", None,
+            self._debug_menu.addAction(self.verbose_log_action)
+            self.stats_overlay_action = self._add_action_obj(
+                "Scene Stats Overlay", None,
                 self._toggle_stats_overlay, checkable=True,
             )
-            self._add_action(self._debug_menu, "Reload Stylesheet", None, self._reload_stylesheet)
+            self._debug_menu.addAction(self.stats_overlay_action)
+            self._reload_action = self._add_action_obj(
+                "Reload Stylesheet", None, self._reload_stylesheet
+            )
+            self._debug_menu.addAction(self._reload_action)
+            # Attach the debug menu to the menu button
+            self._top_bar._menu_btn.setMenu(self._debug_menu)
+            self._top_bar._menu_btn.setPopupMode(QToolButton.InstantPopup)
         elif not active and self._debug_menu is not None:
-            self.menuBar().removeAction(self._debug_menu.menuAction())
             self._debug_menu.deleteLater()
             self._debug_menu = None
+            self._top_bar._menu_btn.setMenu(None)
             debug_tools.VERBOSE_LOGGING = False
             self._stop_stats_overlay()
 
         if active and self._hacker_widget is None:
             self._hacker_widget = HackerStatusWidget()
-            self.statusBar().addPermanentWidget(self._hacker_widget)
+            if self._bottom_bar is not None:
+                self._bottom_bar.layout().insertWidget(1, self._hacker_widget)
         elif not active and self._hacker_widget is not None:
-            self.statusBar().removeWidget(self._hacker_widget)
+            if self._bottom_bar is not None:
+                self._bottom_bar.layout().removeWidget(self._hacker_widget)
             self._hacker_widget.stop()
             self._hacker_widget.deleteLater()
             self._hacker_widget = None
@@ -514,7 +616,8 @@ class MainWindow(QMainWindow):
             self._stats_label.setStyleSheet(
                 f"color: {C.COLOR_INK_DIM}; font-family: '{C.FONT_FAMILY_MONO}'; font-size: 10px;"
             )
-            self.statusBar().addPermanentWidget(self._stats_label)
+            if self._bottom_bar is not None:
+                self._bottom_bar.layout().insertWidget(0, self._stats_label)
         if self._stats_timer is None:
             self._stats_timer = QTimer(self)
             self._stats_timer.timeout.connect(self._update_stats_label)
@@ -526,7 +629,8 @@ class MainWindow(QMainWindow):
             self._stats_timer.stop()
             self._stats_timer = None
         if self._stats_label is not None:
-            self.statusBar().removeWidget(self._stats_label)
+            if self._bottom_bar is not None:
+                self._bottom_bar.layout().removeWidget(self._stats_label)
             self._stats_label.deleteLater()
             self._stats_label = None
         if hasattr(self, "stats_overlay_action"):
@@ -552,8 +656,10 @@ class MainWindow(QMainWindow):
         action.setToolTip(f"{label} ({shortcut})" if shortcut else label)
 
     def _add_action(
-        self, menu, text, shortcut, slot, checkable: bool = False, icon_name: str | None = None
+        self, text, shortcut, slot, checkable: bool = False, icon_name: str | None = None,
     ) -> QAction:
+        """Create a QAction with icon, shortcut, and tooltip. No menu association —
+        actions are collected separately for the command overlay."""
         action = QAction(icons.icon(icon_name), text, self) if icon_name else QAction(text, self)
         if icon_name:
             icons.register(action, lambda obj, ic: obj.setIcon(ic), icon_name)
@@ -562,8 +668,11 @@ class MainWindow(QMainWindow):
         action.setCheckable(checkable)
         action.triggered.connect(slot)
         self._set_tooltip(action)
-        menu.addAction(action)
         return action
+
+    # Alias for hack-mode debug actions that don't need an icon/shortcut
+    def _add_action_obj(self, text, shortcut, slot, checkable=False, icon_name=None):
+        return self._add_action(text, shortcut, slot, checkable=checkable, icon_name=icon_name)
 
     def _show_about(self) -> None:
         QMessageBox.about(
@@ -573,29 +682,35 @@ class MainWindow(QMainWindow):
             "Plan composition, perspective, and lighting before you touch the physical canvas.",
         )
 
+    # All actions collected into a flat list — the command overlay walks
+    # this list and categorizes it, so there's nothing to walk from a menu
+    # bar (there isn't one anymore).
+    _ALL_ACTIONS: list[str] = [
+        "new_action", "open_action", "save_action", "save_as_action",
+        "import_action", "export_action", "exit_action",
+        "undo_action", "redo_action",
+        "delete_action", "duplicate_action", "bring_to_front_action", "send_to_back_action",
+        "flip_h_action", "flip_v_action", "magnify_action", "shrink_action",
+        "lock_action",
+        "fit_action", "ruler_action", "desk_color_action", "palette_action",
+        "help_action",
+    ]
+
     def _collect_actions(self) -> list[QAction]:
-        """Walk the menu bar's own QActions rather than maintaining a
-        second, separately-authored command list — anything added to a
-        menu in the future is automatically searchable in the palette
-        with no extra step, and the two can never drift apart.
-        """
-        result: list[QAction] = []
-
-        def walk(actions) -> None:
-            for action in actions:
-                if action.isSeparator() or action is self.palette_action:
-                    continue
-                submenu = action.menu()
-                if submenu is not None:
-                    walk(submenu.actions())
-                else:
-                    result.append(action)
-
-        walk(self.menuBar().actions())
+        """Return all registered QAction objects for the command overlay.
+        Themes are handled separately (they're a QActionGroup, not in the
+        flat list)."""
+        result = []
+        for attr_name in self._ALL_ACTIONS:
+            action = getattr(self, attr_name, None)
+            if action is not None and not action.isSeparator():
+                result.append(action)
+        # Add theme actions
+        result.extend(self._theme_actions.values())
         return result
 
     def open_command_palette(self) -> None:
-        dialog = CommandPalette(self._collect_actions(), self)
+        dialog = CommandOverlay(self._collect_actions(), self)
         dialog.exec()
 
     # -- recent files ---------------------------------------------------
@@ -616,18 +731,20 @@ class MainWindow(QMainWindow):
         QSettings().remove("recentFiles")
 
     def _populate_recent_menu(self) -> None:
-        self.recent_menu.clear()
+        if self._recent_menu is None:
+            return
+        self._recent_menu.clear()
         recents = self._recent_files()
         if not recents:
-            empty_action = self.recent_menu.addAction("No Recent Paintings")
+            empty_action = self._recent_menu.addAction("No Recent Paintings")
             empty_action.setEnabled(False)
             return
         for path in recents:
-            action = self.recent_menu.addAction(path.stem)
+            action = self._recent_menu.addAction(path.stem)
             action.setToolTip(str(path))
             action.triggered.connect(lambda _checked, p=path: self._open_path(p))
-        self.recent_menu.addSeparator()
-        clear_action = self.recent_menu.addAction("Clear Recent")
+        self._recent_menu.addSeparator()
+        clear_action = self._recent_menu.addAction("Clear Recent")
         clear_action.triggered.connect(self._clear_recent_files)
 
     # -- project lifecycle --------------------------------------------------
@@ -686,7 +803,8 @@ class MainWindow(QMainWindow):
             if multi:
                 self.scene.undo_stack.endMacro()
         debug_tools.log(f"imported {cascade} reference image(s)")
-        self.layers_panel.refresh_structure()
+        if self._layers_panel_inner is not None:
+            self._layers_panel_inner.refresh_structure()
 
     def _build_manifest(self) -> tuple[dict, dict]:
         """Assemble the current (manifest, images) pair from live scene
@@ -733,7 +851,8 @@ class MainWindow(QMainWindow):
         recovery.delete_recovery_file()
         self._update_window_title()
         self._note_recent_file(path)
-        self.statusBar().showMessage(f"Saved to {path.name}", 4000)
+        if self._bottom_bar is not None:
+            self._bottom_bar.set_hint(f"Saved to {path.name}")
 
     def _autosave_tick(self) -> None:
         """Write a crash-recovery snapshot if there's unsaved work. Never
@@ -773,7 +892,8 @@ class MainWindow(QMainWindow):
 
         self.current_path = path
         self._rebuild_workspace(scene)
-        self.layers_panel.refresh_structure()
+        if self._layers_panel_inner is not None:
+            self._layers_panel_inner.refresh_structure()
         self.lock_action.setChecked(self.meta.locked)
         self._update_lock_banner()
         self._note_recent_file(path)
@@ -818,22 +938,34 @@ class MainWindow(QMainWindow):
         finally:
             self.scene.export_study_effect = False
         debug_tools.log(f"exported {fmt} @ {dpi}dpi -> {filename}")
-        self.statusBar().showMessage(f"Exported to {Path(filename).name}", 4000)
+        if self._bottom_bar is not None:
+            self._bottom_bar.set_hint(f"Exported to {Path(filename).name}")
 
     # -- lock -------------------------------------------------------------
     def toggle_lock_setup(self) -> None:
+        """Toggle the setup lock — called from Ctrl+L shortcut, the lock_action
+        QAction, and the top-bar lock button. The top-bar button is also
+        connected to this method via its `toggled` signal, so we block
+        signals on it during the programmatic setChecked below to avoid
+        a feedback loop."""
         if self.scene is None:
             return
         locked = not self.scene.is_globally_locked()
         self.scene.set_global_locked(locked)
         self.lock_action.setChecked(locked)
-        self.layers_panel.setEnabled(not locked)
-        self._update_lock_banner()
+        # Update the top bar lock button without triggering its signal
+        if self._top_bar is not None:
+            self._top_bar.lock_button.blockSignals(True)
+            self._top_bar.lock_button.setChecked(locked)
+            self._top_bar.lock_button.blockSignals(False)
+        if self._bottom_bar is not None:
+            self._bottom_bar.set_locked(locked)
         debug_tools.log(f"setup lock -> {locked}")
 
     def _update_lock_banner(self) -> None:
         locked = self.scene.is_globally_locked() if self.scene else False
-        self.status_lock_banner.setVisible(locked)
+        if self._bottom_bar is not None:
+            self._bottom_bar.set_locked(locked)
 
     # -- misc -----------------------------------------------------------
     def _delete_selected(self) -> None:
@@ -842,27 +974,33 @@ class MainWindow(QMainWindow):
         n = len(self.scene.selected_items())
         self.scene.delete_selected_items()
         debug_tools.log(f"deleted {n} selected item(s)")
-        self.layers_panel.refresh_structure()
-        self.properties_panel.refresh()
+        if self._layers_panel_inner is not None:
+            self._layers_panel_inner.refresh_structure()
+        if self._properties_inner is not None:
+            self._properties_inner.refresh()
 
     def _duplicate_selected(self) -> None:
         if self.scene is None:
             return
         self.scene.duplicate_selected_items()
-        self.layers_panel.refresh_structure()
-        self.properties_panel.refresh()
+        if self._layers_panel_inner is not None:
+            self._layers_panel_inner.refresh_structure()
+        if self._properties_inner is not None:
+            self._properties_inner.refresh()
 
     def _bring_to_front(self) -> None:
         if self.scene is None:
             return
         self.scene.bring_to_front_selected()
-        self.properties_panel.refresh()
+        if self._properties_inner is not None:
+            self._properties_inner.refresh()
 
     def _send_to_back(self) -> None:
         if self.scene is None:
             return
         self.scene.send_to_back_selected()
-        self.properties_panel.refresh()
+        if self._properties_inner is not None:
+            self._properties_inner.refresh()
 
     def _flip_horizontal(self) -> None:
         if self.scene is None:

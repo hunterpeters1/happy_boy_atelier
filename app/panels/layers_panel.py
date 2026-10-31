@@ -507,13 +507,15 @@ class LayersPanel(QWidget):
         add_btn.setToolTip("Import reference image(s)…")
         add_btn.clicked.connect(self.request_import.emit)
         layout.addWidget(add_btn)
+
+        # Sample colour (eyedropper) button — placed beside the Import button,
+        # not on a separate row below it. See issue #2.
+        eyedropper_btn = self._make_tool_button("eyedropper", "eyedropper", "Sample a color from a reference image")
+        layout.addWidget(eyedropper_btn)
+
         layout.addStretch(1)
         self._set_row_widget(row, 0, widget)
         self._span_full_width(row)
-
-        self._add_tool_row(parent, [
-            ("eyedropper", "eyedropper", "Sample a color from a reference image"),
-        ])
 
         # Reversed: the layer group's own list is back-to-front (index 0 =
         # bottom of the stack), but the row order here should read
